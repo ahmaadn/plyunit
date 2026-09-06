@@ -1,0 +1,11 @@
+{
+  "id": "images/test",
+  "name": "images/test",
+  "image_path": "images/test.png",
+  "texture": {
+    "filter": "nearest",
+    "wrap": "clamp",
+    "mipmap": false,
+    "premultiply_alpha": false
+  }
+}

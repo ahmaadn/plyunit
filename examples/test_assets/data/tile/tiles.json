@@ -1,0 +1,118 @@
+{
+  "asset_id": "tiny_world_tiles",
+  "type": "spritesheet",
+  "image_path": "tile/tileset.png",
+  "texture": {
+    "filter": "nearest"
+  },
+  "regions": {
+    "well": [
+      1,
+      1,
+      60,
+      60
+    ],
+    "dirt_path_rect_-1": [
+      1,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_1": [
+      18,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_2": [
+      35,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_3": [
+      52,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_4": [
+      69,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_5": [
+      86,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_6": [
+      103,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_7": [
+      120,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_8": [
+      137,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_9": [
+      154,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_10": [
+      171,
+      268,
+      16,
+      16
+    ],
+    "dirt_path_rect_11": [
+      1,
+      285,
+      16,
+      16
+    ],
+    "dirt_path_rect_12": [
+      18,
+      285,
+      16,
+      16
+    ],
+    "dirt_path_rect_13": [
+      35,
+      285,
+      16,
+      16
+    ],
+    "dirt_path_rect_14": [
+      52,
+      285,
+      16,
+      16
+    ],
+    "dirt_path_rect_15_0_0.8": [
+      69,
+      285,
+      16,
+      16
+    ],
+    "dirt_path_rect_15_1_0.2": [
+      86,
+      285,
+      16,
+      16
+    ]
+  }
+}

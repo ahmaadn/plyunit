@@ -1,0 +1,94 @@
+[project]
+name = "plyunit"
+version = "0.1.0"
+description = "Lightweight 2D game engine units for Python (raylib/pymunk backends)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "numpy>=2.0.0",
+]
+
+[project.optional-dependencies]
+# Host backends are optional. ImGui needs a live OpenGL context (typically raylib).
+raylib = [
+    "raylib>=5.5.0.4",
+]
+physics = ["pymunk>=6.0.0"]
+# Prefer: uv sync --package plyunit --extra raylib --extra imgui (workspace;
+# plyunit is not published to PyPI at this time).
+imgui = [
+    "imgui-bundle>=1.92.0",
+    "pyopengl>=3.1.0",
+]
+# UBR C extension (builds by default on install if a compiler is present).
+# No PLYUNIT_BUILD_NATIVE env required. Runtime fail-fast if .pyd missing.
+native = [
+    "plyunit-native",
+]
+all = [
+    "raylib>=5.5.0.4",
+    "pymunk>=6.0.0",
+    "imgui-bundle>=1.92.0",
+    "pyopengl>=3.1.0",
+    "plyunit-native",
+]
+
+[build-system]
+requires = ["hatchling>=1.25.0"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+plyunit-native = { workspace = true }
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/plyunit"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
+    "rich>=15.0.0",
+]
+
+[tool.pytest]
+minversion = "9.0"
+testpaths = ["tests"]
+pythonpath = [".", "tests", "tests/engine/audio", "../.."]
+addopts = [
+    "--cov=src/plyunit",
+    "--cov-report=term-missing",
+    "--cov-fail-under=85",
+]
+
+[tool.coverage.run]
+branch = false
+source = ["src/plyunit"]
+omit = [
+    "*/backends/interfaces/*",
+    "*/backends/imgui/raylib/backend.py",
+    "*/backends/physics/pymunk/debug_draw.py",
+    "*/backends/integrations/raylib/drawing/_params.py",
+    "*/examples/*",
+    "*/benchmarks/*",
+    "examples/*",
+    "benchmarks/*",
+    "*/site-packages/examples/*",
+    "*/tests/*",
+]
+
+[tool.coverage.report]
+precision = 2
+omit = [
+    "*/examples/*",
+    "*/benchmarks/*",
+    "examples/*",
+    "benchmarks/*",
+    "*/site-packages/examples/*",
+    "*/tests/*",
+]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "\\.\\.\\.",
+    "raise NotImplementedError",
+]

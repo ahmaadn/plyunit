@@ -1,0 +1,11 @@
+{
+  "id": "background/Background_0",
+  "name": "adaada",
+  "image_path": "background/Background_0.png",
+  "texture": {
+    "filter": "nearest",
+    "wrap": "clamp",
+    "mipmap": false,
+    "premultiply_alpha": false
+  }
+}

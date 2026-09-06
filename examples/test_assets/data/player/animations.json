@@ -1,0 +1,28 @@
+{
+    "group": "player_animations",
+    "animations": {
+        "player.run": {
+            "frames": [
+                {
+                    "asset_id": "player:run_0",
+                    "duration": 0.1
+                },
+                {
+                    "asset_id": "player:run_1",
+                    "duration": 0.1
+                },
+                {
+                    "asset_id": "player:run_2",
+                    "duration": 0.1
+                },
+                {
+                    "asset_id": "player:run_3",
+                    "duration": 0.1
+                }
+            ],
+            "loop": true,
+            "speed": 1.0,
+            "paused": false
+        }
+    }
+}

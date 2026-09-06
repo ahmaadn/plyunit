@@ -1,0 +1,113 @@
+site_name: plyunit
+site_description: Documentation for the plyunit 2D game engine (Python + raylib)
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.top
+    - navigation.tracking
+    - navigation.sections
+    - search.highlight
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.superfences
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: folder
+      reconfigure_material: true
+      languages:
+        - locale: en
+          name: English
+          default: true
+          build: true
+        - locale: id
+          name: Bahasa Indonesia
+          build: true
+          site_name: plyunit (Bahasa Indonesia)
+          nav_translations:
+            Home: Beranda
+            Getting started: Memulai
+            Engine core: Inti engine
+            Frame execution order: Urutan eksekusi frame
+            "Migration (breaking)": "Migrasi (breaking)"
+            Naming convention: Konvensi penamaan
+            Configuration schemas: Skema konfigurasi
+            Physics: Fisika
+            "Input & events": "Input & event"
+            "Assets, tilemap & particles": "Assets, tilemap & partikel"
+            Tilemap system: Sistem tilemap
+            "Pooling & spatial": "Pooling & spasial"
+            Gameplay utilities: Utilitas gameplay
+            Rendering: Rendering
+            Overview: Ringkasan
+            Best practices: Praktik terbaik
+            Queued submit: Submit antrean
+            "Layers, sort & cull": "Layer, sort & cull"
+            "UBR (native)": "UBR (native)"
+            Immediate rendering: Render immediate
+            Node rendering guide: Panduan render node
+            Batch render: Render batch
+            Reference: Referensi
+            "Examples & CLI": "Contoh & CLI"
+            Architecture summary: Ringkasan arsitektur
+            Hexagonal audit: Audit heksagonal
+            Architecture layers: Lapisan arsitektur
+            Cheatsheet: Cheatsheet
+            Observability stats: Statistik observabilitas
+            Perf regression check: Cek regresi performa
+
+nav:
+  - Home: index.md
+  - Getting started: getting-started.md
+  - Engine core: engine-core.md
+  - Frame execution order: frame-execution-order.md
+  - "Migration (breaking)": migration.md
+  - Naming convention: naming-convention.md
+  - Configuration schemas: configuration-schemas.md
+  - Gameplay:
+      - Physics: physics.md
+      - "Input & events": input-and-events.md
+      - ImGui: imgui.md
+      - Audio: audio.md
+      - "Assets, tilemap & particles": assets-tilemap-particles.md
+      - Tilemap system: tilemap-system.md
+      - "Pooling & spatial": pooling-and-spatial.md
+      - Gameplay utilities: gameplay-utilities.md
+  - Rendering:
+      - Overview: rendering/index.md
+      - Best practices: rendering/best-practices.md
+      - Queued submit: rendering/queued-submit.md
+      - "Layers, sort & cull": rendering/layers-sort-cull.md
+      - "UBR (native)": rendering/ubr.md
+      - Immediate rendering: immediate-rendering.md
+      - Node rendering guide: node-rendering-guide.md
+      - Batch render: batch-render.md
+  - Reference:
+      - "Examples & CLI": examples-and-cli.md
+      - Architecture summary: architecture-plan-alignment.md
+      - Hexagonal audit: architecture-hexagonal-audit.md
+      - Architecture layers: architecture-layers.md
+      - Cheatsheet: cheatsheet.md
+      - Observability stats: observability/stats.md
+      - Perf regression check: perf/regression-check.md

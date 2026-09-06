@@ -1,0 +1,9 @@
+# build / native artifacts
+build/
+*.pyd
+*.so
+*.dll
+__pycache__/
+.pytest_cache/
+.coverage
+*.egg-info/

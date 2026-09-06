@@ -1,0 +1,13 @@
+{
+  "id": "background_1",
+  "type": "spritesheet",
+  "name": "background",
+  "image_path": "background/background.png",
+  "texture": {
+    "filter": "linear",
+    "wrap": "clamp",
+    "mipmap": false,
+    "premultiply_alpha": false
+  },
+  "regions": {}
+}

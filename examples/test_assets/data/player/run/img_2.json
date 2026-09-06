@@ -1,0 +1,12 @@
+{
+  "id": "player:run_2",
+  "type": "image",
+  "name": "player/run/img_2",
+  "image_path": "player/run/img_2.png",
+  "texture": {
+    "filter": "nearest",
+    "wrap": "clamp",
+    "mipmap": false,
+    "premultiply_alpha": false
+  }
+}
