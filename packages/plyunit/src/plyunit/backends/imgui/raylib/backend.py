@@ -193,17 +193,20 @@ class ImGuiBackend:
         )
         io.display_framebuffer_scale = imgui.ImVec2(1.0, 1.0)
         io.delta_time = 1.0 / 60.0
-        for _ in range(2):
-            pr.begin_drawing()
-            imgui.new_frame()
-            imgui.begin("##plyunit_imgui_warmup")
-            imgui.text(".")
-            imgui.end()
-            imgui.render()
-            pr.rl_draw_render_batch_active()
-            self._renderer.render(imgui.get_draw_data())
-            pr.rl_set_texture(0)
-            pr.end_drawing()
+        # Comment out the two-frame warmup drawing sequence that was previously
+        # executed during initialization, as it is no longer needed and may
+        # cause unintended side effects during backend setup.
+        # for _ in range(2):
+        #     pr.begin_drawing()
+        #     imgui.new_frame()
+        #     imgui.begin("##plyunit_imgui_warmup")
+        #     imgui.text(".")
+        #     imgui.end()
+        #     imgui.render()
+        #     pr.rl_draw_render_batch_active()
+        #     self._renderer.render(imgui.get_draw_data())
+        #     pr.rl_set_texture(0)
+        #     pr.end_drawing()
 
     def shutdown(self) -> None:
         """Destroy the ImGui context and clean up the OpenGL renderer resources."""
