@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 import plyunit.assets.assets as assets_module
-from plyunit.assets.types import ConfigTexture
+from plyunit.assets.types import TextureProperty
 
 
 class FakeTexture:
@@ -18,7 +18,7 @@ class FakeTexture:
 
 class StoreDummyLoader:
     def __init__(self) -> None:
-        self.default = ConfigTexture(
+        self.default = TextureProperty(
             filter="nearest",
             wrap="clamp",
             mipmap=False,
@@ -121,16 +121,6 @@ def test_store_textures_rejects_none_entry() -> None:
 
     with pytest.raises(ValueError, match="rect_1"):
         manager.store_textures({"rect_1": None})
-
-
-def test_register_texture_is_deprecated_alias() -> None:
-    manager = make_assets()
-    texture = FakeTexture("legacy", 4, 4)
-
-    with pytest.deprecated_call():
-        manager.register_texture("legacy", texture)
-
-    assert manager.get_asset("legacy") is texture
 
 
 def test_stored_textures_are_atlas_packable() -> None:

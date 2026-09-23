@@ -87,9 +87,6 @@ class SpriteRenderer(Component):
         # (e.g. in the editor).
         self._assets_ref: weakref.ref | None = None
 
-        if self._asset_key is None and self._texture is None:
-            raise ValueError("Either asset_key or texture must be provided")
-
         self.layer = layer
         self.pivot = pivot
         self.visible = visible
@@ -100,6 +97,10 @@ class SpriteRenderer(Component):
         self.source_rect = source_rect if source_rect else None
         self.scale = scale
         self.z_index = z_index
+
+    def on_start(self):
+        if self._asset_key is None and self._texture is None:
+            raise ValueError("Either asset_key or texture must be provided")
 
     def _assets(self):
         """Resolves the Assets service with a weakref cache (see ``_assets_ref``)."""

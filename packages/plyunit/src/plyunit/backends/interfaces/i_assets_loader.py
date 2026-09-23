@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 from plyunit.core.types import ColorType, Texture
 
 if TYPE_CHECKING:
-    from plyunit.assets.types import ConfigImage, ConfigTexture
+    from plyunit.assets.types import ImageData, TextureProperty
 
 
 @runtime_checkable
@@ -33,7 +33,7 @@ class IAssetsLoader(Protocol):
     (resize / flip / color ops / procedural images / pixel sampling).
     """
 
-    default: ConfigTexture
+    default: TextureProperty
     """Default texture configuration used as the fallback for loads."""
 
     def set_default_config_texture(
@@ -272,14 +272,14 @@ class IAssetsLoader(Protocol):
 
     def load_texture_from_dict(
         self,
-        data: Mapping[str, Any] | ConfigImage,
+        data: Mapping[str, Any] | ImageData,
         *,
         image_path: Path | str | None = None,
     ) -> Texture:
         """Load a texture from an image config mapping.
 
         Args:
-            data: :class:`ConfigImage`-shaped mapping with load options.
+            data: :class:`ImageData`-shaped mapping with load options.
             image_path: Optional base path used to resolve a relative image
                 file.
 

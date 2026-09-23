@@ -9,7 +9,7 @@ import pytest
 import plyunit as pu
 import plyunit.assets.assets as assets_module
 from plyunit.assets.animations import AnimationClip, AnimationFrame, Animations
-from plyunit.assets.types import ConfigTexture, TextureData
+from plyunit.assets.types import TextureData, TextureProperty
 
 unit_module = importlib.import_module("plyunit.core.units.unit")
 
@@ -41,7 +41,7 @@ class AtlasDummyLoader:
     """Dummy loader that records all atlas composition operations."""
 
     def __init__(self) -> None:
-        self.default = ConfigTexture(
+        self.default = TextureProperty(
             filter="nearest",
             wrap="clamp",
             mipmap=False,

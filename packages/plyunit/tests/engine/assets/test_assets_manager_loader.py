@@ -8,7 +8,7 @@ import pytest
 
 import plyunit as pu
 import plyunit.assets.assets as assets_module
-from plyunit.assets.types import ConfigTexture, TextureData
+from plyunit.assets.types import TextureData, TextureProperty
 
 unit_module = importlib.import_module("plyunit.core.units.unit")
 
@@ -25,7 +25,7 @@ class DummyLoader:
     def __init__(self) -> None:
         self.texture_calls: list[Path] = []
         self.dict_calls: list[tuple[object, Path | None]] = []
-        self.default = ConfigTexture(
+        self.default = TextureProperty(
             filter="nearest",
             wrap="clamp",
             mipmap=False,
@@ -387,18 +387,25 @@ def test_asset_manager_load_folder_processes_configs_and_images(
     )
     (folder / "coin.png").write_text("x", encoding="utf-8")
 
-    called: list[Path] = []
+    called_assets: list[Path] = []
+    called_configs: list[dict] = []
 
     def fake_load_asset(path: str, *, asset_id: str | None = None) -> None:
         _ = asset_id
-        called.append(Path(path))
+        called_assets.append(Path(path))
+
+    def fake_load_from_dict(data: dict, *, asset_id: str | None = None) -> None:
+        _ = asset_id
+        called_configs.append(data)
 
     monkeypatch.setattr(manager, "load_asset", fake_load_asset)
+    monkeypatch.setattr(manager, "load_from_dict", fake_load_from_dict)
 
     manager.load_folder("sprites", allow_extensions=[".png"])
 
-    assert Path("sprites") / "hero.json" in called
-    assert Path("sprites") / "coin.png" in called
+    # Configs are processed via load_from_dict, standalone images via load_asset.
+    assert called_configs and called_configs[0]["id"] == "hero"
+    assert Path("sprites") / "coin.png" in called_assets
 
     with pytest.raises(FileNotFoundError, match="Folder tidak ada"):
         manager.load_folder("missing")

@@ -1,9 +1,6 @@
 # Configuration schema examples
 
-This page documents the current JSON shapes accepted by `plyunit`. These are
-parser-backed examples, not formal JSON Schema documents. Unless stated
-otherwise, unknown keys may be ignored by permissive asset/map parsers, while
-`AppConfig` rejects unknown constructor fields.
+Halaman ini mendokumentasikan struktur JSON yang saat ini diterima oleh `plyunit`. Contoh-contoh ini didasarkan pada implementasi parser dan bukan merupakan dokumen JSON Schema formal. Kecuali dinyatakan lain, kunci yang tidak dikenal mungkin diabaikan oleh parser aset/peta yang bersifat permisif, sedangkan `AppConfig` akan menolak kolom konstruktor yang tidak dikenal.
 
 ## Format overview
 
@@ -18,19 +15,19 @@ otherwise, unknown keys may be ignored by permissive asset/map parsers, while
 | Audio bank | `Audio.load_bank` | SFX and music entries |
 | Autotile config | `AutotileProcessor` | Offline/editor bitmask rules |
 
-There is no shader JSON format. Shaders are loaded through `Shaders.load` or
+Tidak ada format JSON untuk shader. Shader dimuat melalui `Shaders.load` atau
 `Shaders.load_from_memory`.
 
 ## App configuration
 
-Load a JSON file directly through bootstrap:
+Muat file JSON secara langsung melalui bootstrap:
 
 ```python
 app = pu.init(GameApp(), "data/app.json")
 app.run()
 ```
 
-Complete example:
+Contoh komplit:
 
 ```json
 {
@@ -75,7 +72,7 @@ Complete example:
 }
 ```
 
-Minimal example:
+Contoh minimal:
 
 ```json
 {
@@ -85,18 +82,18 @@ Minimal example:
 }
 ```
 
-Important validation rules:
+Aturan validasi penting:
 
-- Window dimensions, `fixed_update_hz`, `max_frame_delta_time`, and
-  `max_substeps_per_frame` must be greater than zero.
-- `target_fps` may be zero for an uncapped frame rate.
-- Audio volumes must be between `0.0` and `1.0`.
-- `spatial_max_distance` must exceed `spatial_min_distance`.
-- Unknown root or nested fields are rejected.
+- Dimensi jendela, `fixed_update_hz`, `max_frame_delta_time`, dan
+`max_substeps_per_frame` harus lebih besar dari nol.
+- `target_fps` boleh bernilai nol untuk *frame rate* tanpa batas.
+- Volume audio harus berada di antara `0,0` dan `1,0`.
+- `spatial_max_distance` harus lebih besar daripada `spatial_min_distance`.
+- *Field* akar atau *field* bersarang yang tidak dikenal akan ditolak.
 
 ## Image asset configuration
 
-Configure the asset base once, then load paths relative to it:
+Konfigurasikan basis aset sekali saja, lalu muat jalur yang relatif terhadapnya:
 
 ```python
 self.assets.set_assets_path("data/assets")
@@ -142,12 +139,12 @@ Texture fields:
 | `premultiply_alpha` | boolean | `false` |
 | `color_key` | `[r, g, b, a]` | `[0, 0, 0, 255]` |
 
-When loaded through `load_asset`, `image_path` is first resolved relative to
-the asset base. If it is not found, the loader also checks for the image beside
-the JSON sidecar. `load_folder` does not use this sidecar fallback. Resolved
-paths must remain under the asset base directory.
+Saat diload melalui `load_asset`, `load_spritesheet`, atau `load_folder`,
+`image_path` pertama-tama diselesaikan (resolved) relatif terhadap basis aset. Jika tidak
+ditemukan, loader juga akan memeriksa keberadaan gambar di lokasi yang sama dengan file JSON pendampingnya.
+Path yang telah diselesaikan harus tetap berada di dalam direktori basis aset.
 
-Direct image files need no JSON:
+File gambar langsung tidak memerlukan JSON:
 
 ```python
 self.assets.load_asset("ui/icon.png")  # cache ID: icon
@@ -155,8 +152,8 @@ self.assets.load_asset("ui/icon.png")  # cache ID: icon
 
 ## Spritesheet asset configuration
 
-A spritesheet is an image asset with `type: "spritesheet"` and named regions.
-Both compact array regions and object regions are accepted:
+Spritesheet adalah aset gambar dengan `type: "spritesheet"`.
+Baik region berupa array ringkas maupun region berupa objek dapat diterima:
 
 ```json
 {
@@ -200,57 +197,11 @@ The supported root ID field is `id`. Some old example/editor files contain
 `asset_id`, but the current spritesheet parser does not use that key as the
 spritesheet ID.
 
-## Embedded spritesheet animations
+## Animation configuration
 
-Spritesheets may contain `animation_groups`. Frame IDs are not validated while
-loading; they are retained as `asset_id` values and must resolve when the
-animation is rendered:
-
-```json
-{
-  "id": "hero_sheet",
-  "type": "spritesheet",
-  "image_path": "characters/hero.png",
-  "regions": {
-    "hero_idle_0": [0, 0, 32, 32],
-    "hero_idle_1": [32, 0, 32, 32],
-    "hero_run_0": [0, 32, 32, 32],
-    "hero_run_1": [32, 32, 32, 32]
-  },
-  "animation_groups": [
-    {
-      "group": "hero",
-      "animations": {
-        "hero.idle": {
-          "frames": [
-            {"asset_id": "hero_idle_0", "duration": 0.2},
-            {"asset_id": "hero_idle_1", "duration": 0.2}
-          ],
-          "loop": true,
-          "speed": 1.0,
-          "paused": false
-        },
-        "hero.run": {
-          "default": {"duration": 0.1},
-          "frames": [
-            {"asset_id": "hero_run_0"},
-            {"asset_id": "hero_run_1"}
-          ],
-          "loop": true
-        }
-      }
-    }
-  ]
-}
-```
-
-`init` creates the `Animations` service before assets are normally
-loaded, so `Assets.load_spritesheet` can register embedded clips through
-`@Animations`.
-
-## Standalone animation configuration
-
-Standalone animation files use the same group and clip shapes:
+Animations are no longer embedded in spritesheet JSON (`animation_groups`
+was removed); load them from standalone files instead. Standalone
+animation files use these group and clip shapes:
 
 ```json
 {

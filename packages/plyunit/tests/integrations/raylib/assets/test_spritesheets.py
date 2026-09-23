@@ -23,7 +23,7 @@ def mock_assets(tmp_path):
 
     # Bind the real methods to the mock object
     assets.load_spritesheet = Assets.load_spritesheet.__get__(assets)
-    assets._resolve_asset_id = Assets._resolve_asset_id.__get__(assets)
+    assets.load_from_dict = Assets.load_from_dict.__get__(assets)
     assets._resolve_config_image_path = Assets._resolve_config_image_path.__get__(assets)
     return assets
 
@@ -44,23 +44,7 @@ def test_assets_load_spritesheet(mock_assets, mock_animations, tmp_path):
         "regions": {
             "region_1": [0, 0, 32, 32],
             "region_2": [32, 0, 32, 32]
-        },
-        "animation_groups": [
-            {
-                "group": "test_group",
-                "animations": {
-                    "idle": {
-                        "frames": [
-                            {"asset_id": "region_1", "duration": 0.2},
-                            {"asset_id": "region_2", "duration": 0.2}
-                        ],
-                        "loop": True,
-                        "speed": 1.5,
-                        "paused": False
-                    }
-                }
-            }
-        ]
+        }
     }
 
     # Create fake image file
@@ -92,17 +76,8 @@ def test_assets_load_spritesheet(mock_assets, mock_animations, tmp_path):
     assert regions_store["region_1"].parent_id == "test_sheet"
     assert regions_store["region_1"].source_rect == (0.0, 0.0, 32.0, 32.0)
 
-    # Verify animations added via load_animation
-    mock_animations.load_animation.assert_called_once()
-    anim_config = mock_animations.load_animation.call_args[0][0]
-
-    assert anim_config["group"] == "test_group"
-    assert "idle" in anim_config["animations"]
-    assert anim_config["animations"]["idle"]["loop"] is True
-    assert anim_config["animations"]["idle"]["speed"] == 1.5
-    assert len(anim_config["animations"]["idle"]["frames"]) == 2
-    assert anim_config["animations"]["idle"]["frames"][0]["asset_id"] == "region_1"
-    assert anim_config["animations"]["idle"]["frames"][0]["duration"] == 0.2
+    # Animations are no longer part of the spritesheet config.
+    mock_animations.load_animation.assert_not_called()
 
 
 def test_assets_load_spritesheet_missing_image_path(mock_assets, mock_animations, tmp_path):

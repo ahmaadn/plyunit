@@ -142,10 +142,10 @@ Texture fields:
 | `premultiply_alpha` | boolean | `false` |
 | `color_key` | `[r, g, b, a]` | `[0, 0, 0, 255]` |
 
-When loaded through `load_asset`, `image_path` is first resolved relative to
-the asset base. If it is not found, the loader also checks for the image beside
-the JSON sidecar. `load_folder` does not use this sidecar fallback. Resolved
-paths must remain under the asset base directory.
+When loaded through `load_asset`, `load_spritesheet`, or `load_folder`,
+`image_path` is first resolved relative to the asset base. If it is not
+found, the loader also checks for the image beside the JSON sidecar.
+Resolved paths must remain under the asset base directory.
 
 Direct image files need no JSON:
 
@@ -200,57 +200,11 @@ The supported root ID field is `id`. Some old example/editor files contain
 `asset_id`, but the current spritesheet parser does not use that key as the
 spritesheet ID.
 
-## Embedded spritesheet animations
+## Animation configuration
 
-Spritesheets may contain `animation_groups`. Frame IDs are not validated while
-loading; they are retained as `asset_id` values and must resolve when the
-animation is rendered:
-
-```json
-{
-  "id": "hero_sheet",
-  "type": "spritesheet",
-  "image_path": "characters/hero.png",
-  "regions": {
-    "hero_idle_0": [0, 0, 32, 32],
-    "hero_idle_1": [32, 0, 32, 32],
-    "hero_run_0": [0, 32, 32, 32],
-    "hero_run_1": [32, 32, 32, 32]
-  },
-  "animation_groups": [
-    {
-      "group": "hero",
-      "animations": {
-        "hero.idle": {
-          "frames": [
-            {"asset_id": "hero_idle_0", "duration": 0.2},
-            {"asset_id": "hero_idle_1", "duration": 0.2}
-          ],
-          "loop": true,
-          "speed": 1.0,
-          "paused": false
-        },
-        "hero.run": {
-          "default": {"duration": 0.1},
-          "frames": [
-            {"asset_id": "hero_run_0"},
-            {"asset_id": "hero_run_1"}
-          ],
-          "loop": true
-        }
-      }
-    }
-  ]
-}
-```
-
-`init` creates the `Animations` service before assets are normally
-loaded, so `Assets.load_spritesheet` can register embedded clips through
-`@Animations`.
-
-## Standalone animation configuration
-
-Standalone animation files use the same group and clip shapes:
+Animations are no longer embedded in spritesheet JSON (`animation_groups`
+was removed); load them from standalone files instead. Standalone
+animation files use these group and clip shapes:
 
 ```json
 {

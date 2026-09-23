@@ -6,34 +6,88 @@ loading, caching, and providing textures for the game. Supports loading
 from direct images, from JSON configuration (image, spritesheet,
 animation), and in batches from a folder.
 
-The runtime cache stores :class:`TextureData` and :class:`ConfigImage`
+The runtime cache stores :class:`TextureData` and :class:`ImageData`
 as dataclasses. JSON input is still accepted as a ``dict`` via
 :meth:`load_from_dict`.
 """
 
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from pathlib import Path
 from types import MappingProxyType
-from typing import Any, Unpack
-from warnings import deprecated
+from typing import Any
 
 from plyunit.assets.atlas import AtlasPage, AtlasPlacement, pack_shelf
 from plyunit.assets.types import (
-    ConfigImage,
+    ImageConfig,
+    ImageData,
+    SpriteSheetConfig,
     TextureData,
-    _TextureParams,
-    config_image_from_dict,
 )
 from plyunit.backends.interfaces.i_assets_loader import IAssetsLoader
-from plyunit.core.types import Texture
+from plyunit.core.types import (
+    ColorType,
+    PosType,
+    RectType,
+    SourceRectType,
+    Texture,
+    Vec2Type,
+)
 from plyunit.core.units.service_unit import ServiceUnit
+from plyunit.rendering.enum import Layer
 from plyunit.utils.io import read_json
 
 logger = logging.getLogger(__name__)
 
 # Default supported extensions for batch loading.
 DEFAULT_IMAGE_EXTENSIONS = [".png", ".jpg", ".jpeg", ".bmp", ".tga"]
+
+
+def _parse_rect(region_id: str, region_data: Any) -> tuple[float, float, float, float]:
+    """Parse one spritesheet region into an ``(x, y, w, h)`` float tuple.
+
+    Args:
+        region_id: Region ID (used for error messages).
+        region_data: Either a ``[x, y, w, h]`` sequence or a legacy
+            mapping with a ``rect`` key.
+
+    Returns:
+        The parsed rectangle.
+
+    Raises:
+        ValueError: If the region data is not a valid rectangle.
+    """
+    if isinstance(region_data, Mapping):
+        region_data = region_data.get("rect", [0, 0, 0, 0])
+    if not isinstance(region_data, (list, tuple)):
+        raise ValueError(
+            f"Region '{region_id}' must be a list [x,y,w,h] or dict with rect"
+        )
+    if len(region_data) != 4:
+        raise ValueError(f"Region '{region_id}' must have 4 values for rect")
+    return (
+        float(region_data[0]),
+        float(region_data[1]),
+        float(region_data[2]),
+        float(region_data[3]),
+    )
+
+
+def _iter_regions(regions: Any) -> Iterator[tuple[str, Any]]:
+    """Yield ``(region_id, region_data)`` pairs from either regions form.
+
+    Args:
+        regions: A mapping of ``region_id`` -> rect data, or a list of
+            ``{"name": ..., "rect": ...}`` entries.
+
+    Yields:
+        Pairs of region ID and raw region data.
+    """
+    if isinstance(regions, Mapping):
+        yield from regions.items()
+    else:
+        for item in regions:
+            yield item["name"], item.get("rect")
 
 
 class Assets(ServiceUnit):
@@ -47,7 +101,7 @@ class Assets(ServiceUnit):
             spritesheet regions).
         _regions: Mapping of ``parent_id`` -> the set of ``region_id``
             values owned by the spritesheet.
-        _configs: Cache of ``asset_id`` -> :class:`ConfigImage` (JSON context).
+        _configs: Cache of ``asset_id`` -> :class:`ImageData` (JSON context).
         _atlases: Set of atlas page IDs produced by
             :meth:`build_texture_atlas` (so they are not re-packed).
         _asset_base_path: Absolute base directory for all asset paths.
@@ -72,7 +126,7 @@ class Assets(ServiceUnit):
 
         self._textures: dict[str, TextureData] = {}
         self._regions: dict[str, set[str]] = {}
-        self._configs: dict[str, ConfigImage] = {}
+        self._configs: dict[str, ImageData] = {}
         self._atlases: set[str] = set()
         self._asset_base_path = Path(asset_base_path)
         if loader is None:
@@ -91,8 +145,8 @@ class Assets(ServiceUnit):
         """
         return MappingProxyType(self._textures)
 
-    def get_config_for(self, asset_id: str) -> ConfigImage | None:
-        """Return the :class:`ConfigImage` configuration for a given asset.
+    def get_config_for(self, asset_id: str) -> ImageData | None:
+        """Return the :class:`ImageData` configuration for a given asset.
 
         Only available for assets loaded through a JSON file.
         Assets loaded directly from an image have no stored config.
@@ -101,7 +155,7 @@ class Assets(ServiceUnit):
             asset_id: ID of the asset whose configuration is requested.
 
         Returns:
-            The :class:`ConfigImage` if found, ``None`` otherwise.
+            The :class:`ImageData` if found, ``None`` otherwise.
         """
         return self._configs.get(asset_id)
 
@@ -180,90 +234,100 @@ class Assets(ServiceUnit):
 
         if asset_path.suffix.lower() == ".json":
             config_data = read_json(str(asset_path))
-            if config_data.get("type") == "spritesheet":
-                return self.load_spritesheet(path, asset_id=asset_id)
-
             config_data["config_path"] = asset_path
             return self.load_from_dict(config_data, asset_id=asset_id)
 
         return self._load_image_asset(asset_path, asset_id=asset_id)
 
     def load_from_dict(
-        self, data: Mapping[str, Any], *, asset_id: str | None = None
+        self,
+        data: ImageConfig | SpriteSheetConfig | Mapping[str, Any],
+        *,
+        asset_id: str | None = None,
     ) -> None:
-        """Load an asset from a JSON configuration dictionary.
+        """Load an asset (image or spritesheet) from a JSON config dict.
 
-        The input remains a ``dict`` (not a dataclass). The parsed result
-        is stored as a :class:`ConfigImage` in the cache.
+        The input remains a ``dict`` (not a dataclass). The parsed
+        result is stored as an :class:`ImageData` in the cache. When
+        the config type is ``"spritesheet"``, its regions are
+        registered as texture aliases of the sheet.
 
         Args:
-            data: Configuration dictionary. Must contain ``config_path``
-                and ``image_path``.
-            asset_id: Asset ID (optional, may be taken from the config).
+            data: Configuration dictionary. Must contain
+                ``image_path`` and an ID (from ``asset_id``,
+                ``data["id"]``, or the ``config_path`` file stem).
+            asset_id: Explicit asset ID override. When ``None``, the
+                ID is taken from ``data["id"]`` or, as a fallback,
+                from the config file stem.
 
         Raises:
             FileNotFoundError: If the image file is not found.
-            ValueError: If ``image_path`` or ``config_path`` is missing.
+            ValueError: If ``image_path`` is missing, no asset ID can
+                be determined, or a spritesheet region is malformed.
         """
-        raw_config_path = data.get("config_path")
-        if not raw_config_path:
-            raise ValueError("config_path is required in data")
+        raw: dict[str, Any] = dict(data)
+        config_path = raw.get("config_path")
+        if not raw.get("image_path"):
+            raise ValueError(
+                f"image_path is required in config "
+                f"'{Path(config_path).name if config_path else data}'"
+            )
 
-        config_path = Path(raw_config_path)
-        logger.debug(f"Memproses konfigurasi JSON: {config_path.name}")
+        resolved_asset_id = asset_id or str(raw.get("id") or "")
+        if not resolved_asset_id and config_path is not None:
+            resolved_asset_id = Path(config_path).stem
+        if not resolved_asset_id or not resolved_asset_id.strip():
+            raise ValueError(
+                "Asset ID wajib ada (asset_id, data['id'], atau config_path)"
+            )
 
-        cfg = config_image_from_dict(
-            data, config_path=config_path, defaults=self._loader.default
+        if config_path is not None:
+            image_path = self._resolve_config_image_path(
+                str(raw["image_path"]), Path(config_path)
+            )
+        else:
+            image_path = self._resolve_under_base(raw["image_path"])
+
+        if not image_path.is_file():
+            logger.error(
+                f"File gambar '{image_path.name}' tidak ada untuk aset "
+                f"'{resolved_asset_id}'"
+            )
+            raise FileNotFoundError(
+                f"File gambar '{image_path.name}' tidak ada untuk aset "
+                f"'{resolved_asset_id}'"
+            )
+
+        cfg = ImageData.from_dict(
+            {**raw, "id": resolved_asset_id, "image_path": image_path},
+            texture_default=self._loader.default,
         )
-        image_path = self._resolve_image_path(cfg, config_path)
-        resolved_asset_id = self._resolve_asset_id(asset_id, cfg, config_path)
-        if not cfg.id:
-            cfg.id = resolved_asset_id
+        texture = self._loader.load_texture_from_dict(data=cfg, image_path=image_path)
+        self._cache_texture(resolved_asset_id, texture)
 
-        self._validate_image_path(image_path, resolved_asset_id)
+        # Store
+        self._configs[resolved_asset_id] = cfg
+        if cfg.type != "spritesheet":
+            logger.info(f"Aset '{resolved_asset_id}' berhasil dimuat")
+            return
 
-        self._cache_texture(
-            resolved_asset_id,
-            self._loader.load_texture_from_dict(data, image_path=image_path),
-        )
+        region_ids: list[str] = []
+        for region_id, region_data in _iter_regions(raw.get("regions") or {}):
+            rect = _parse_rect(region_id, region_data)
+            t_data = TextureData(
+                parent_id=resolved_asset_id,
+                texture=texture,
+                source_rect=rect,
+            )
+            self._register_region(region_id, t_data)
+            region_ids.append(region_id)
+
+        self._regions[resolved_asset_id] = set(region_ids)
 
         logger.info(
-            f"Aset '{resolved_asset_id}' berhasil dimuat (config: {config_path.name})"
+            f"Spritesheet '{resolved_asset_id}' berhasil dimuat dengan "
+            f"{len(region_ids)} region"
         )
-
-        self._configs[resolved_asset_id] = cfg
-
-    def _resolve_image_path(self, config: ConfigImage, config_path: Path) -> Path:
-        """Resolve the image path from the configuration.
-
-        Args:
-            config: Configuration data (dataclass).
-            config_path: Path to the configuration file.
-
-        Returns:
-            The image file path resolved against asset_base_path.
-
-        Raises:
-            ValueError: If image_path is missing from the configuration.
-        """
-        if not config.image_path:
-            logger.error(
-                f"Field 'image_path' wajib ada di konfigurasi: {config_path.name}"
-            )
-            raise ValueError(
-                f"Field 'image_path' wajib ada di konfigurasi: {config_path.name}"
-            )
-
-        image_path = self._resolve_config_image_path(config.image_path, config_path)
-
-        if image_path.parent != config_path.parent:
-            logger.warning(
-                f"Disarankan file config '{config_path.name}' dan gambar "
-                f"{image_path.name!r} berada di folder yang sama."
-            )
-
-        logger.debug(f"Image path dari config: {image_path.name}")
-        return image_path
 
     def _resolve_config_image_path(self, image_path: str, config_path: Path) -> Path:
         """Resolve a root-relative image_path, then one relative to the sidecar.
@@ -272,6 +336,16 @@ class Assets(ServiceUnit):
         root, while editor-produced sidecars store the image file name
         next to the JSON. The root-relative format takes priority; the
         sidecar fallback is only used when that candidate does not exist.
+
+        Args:
+            image_path: The image path from the configuration.
+            config_path: Path of the JSON configuration file.
+
+        Returns:
+            The resolved image path (may not exist).
+
+        Raises:
+            ValueError: If the sidecar candidate escapes the base path.
         """
         root_candidate = self._resolve_under_base(image_path)
         if root_candidate.is_file():
@@ -286,48 +360,31 @@ class Assets(ServiceUnit):
             return sidecar_candidate
         return root_candidate
 
-    def _resolve_asset_id(
-        self,
-        asset_id: str | None,
-        config: ConfigImage | Mapping[str, Any],
-        config_path: Path,
-    ) -> str:
-        """Determine the asset ID to use.
+    def load_spritesheet(
+        self, config_path: str, *, asset_id: str | None = None
+    ) -> None:
+        """Load a spritesheet from its JSON configuration file.
+
+        Reads the configuration, injects the config path (for image
+        sidecar resolution and the sheet ID fallback), then delegates
+        to :meth:`load_from_dict`.
 
         Args:
-            asset_id: The explicitly provided asset ID.
-            config: Configuration data (dataclass or mapping).
-            config_path: The configuration path.
-
-        Returns:
-            The final asset ID used.
-        """
-        if asset_id:
-            resolved_id = asset_id
-        elif isinstance(config, ConfigImage):
-            resolved_id = config.id or config_path.stem
-        else:
-            resolved_id = str(config.get("id") or config_path.stem)
-        logger.debug(f"Asset ID: {resolved_id}")
-        return resolved_id
-
-    def _validate_image_path(self, image_path: Path, asset_id: str) -> None:
-        """Validate that the image path exists.
-
-        Args:
-            image_path: The image file path.
-            asset_id: Asset ID (for logging).
+            config_path: Path to the configuration file, relative to
+                the asset base path.
+            asset_id: The spritesheet ID override.
 
         Raises:
-            FileNotFoundError: If the image is not found.
+            FileNotFoundError: If the image file is not found.
+            ValueError: If ``image_path`` is missing, no asset ID can
+                be determined, or a spritesheet region is malformed.
         """
-        if not image_path.is_file():
-            logger.error(
-                f"File gambar '{image_path.name}' tidak ada untuk aset '{asset_id}'"
-            )
-            raise FileNotFoundError(
-                f"File gambar '{image_path.name}' tidak ada untuk aset '{asset_id}'"
-            )
+        logger.debug(f"Memuat spritesheet dari {config_path}")
+        config_file = self._resolve_under_base(config_path)
+        config_data = read_json(str(config_file))
+        config_data["config_path"] = config_file
+        config_data.setdefault("type", "spritesheet")
+        return self.load_from_dict(config_data, asset_id=asset_id)
 
     def _cache_texture(
         self,
@@ -426,11 +483,6 @@ class Assets(ServiceUnit):
         """
         for asset_id, texture in textures.items():
             self.store_texture(asset_id, texture)
-
-    @deprecated("Gunakan store_texture")
-    def register_texture(self, asset_id: str, texture: Texture) -> None:
-        """Deprecated alias of :meth:`store_texture`."""
-        self.store_texture(asset_id, texture)
 
     def unload_asset(self, asset_id: str) -> None:
         """Unload a single asset from the cache (and from GPU if a root asset).
@@ -579,13 +631,15 @@ class Assets(ServiceUnit):
                 config_data = read_json(str(config_file))
 
                 if "image_path" not in config_data or not config_data["image_path"]:
-                    raise ValueError(
+                    logger.debug(
                         f"image_path is required in config '{config_file.name}'"
                     )
+                    continue
 
-                image_path_str = str(config_data["image_path"])
-                image_path = self._resolve_under_base(image_path_str)
-
+                config_data["config_path"] = config_file
+                image_path = self._resolve_config_image_path(
+                    str(config_data["image_path"]), config_file
+                )
                 if image_path.parent != config_file.parent:
                     logger.warning(
                         f"Disarankan file config '{config_file.name}' dan gambar "
@@ -601,12 +655,7 @@ class Assets(ServiceUnit):
 
                 loaded_image_paths.add(image_path.absolute())
 
-                relative_path = config_file.relative_to(self._asset_base_path)
-                if config_data.get("type") == "spritesheet":
-                    self.load_spritesheet(str(relative_path))
-                else:
-                    self.load_asset(str(relative_path))
-
+                self.load_from_dict(config_data)
                 logger.debug(
                     f"Config diproses: {config_file.stem} (gambar: {image_path.name})"
                 )
@@ -654,103 +703,6 @@ class Assets(ServiceUnit):
             logger.info(
                 f"{standalone_count} gambar standalone dimuat dari '{folder_path}'"
             )
-
-    def load_spritesheet(
-        self, config_path: str, *, asset_id: str | None = None
-    ) -> None:
-        """Load a texture from a spritesheet configuration file.
-
-        Args:
-            config_path: Path to the configuration file.
-            asset_id: The spritesheet ID.
-        """
-        logger.debug(f"Memuat spritesheet dari {config_path}")
-        config_file = self._resolve_under_base(config_path)
-        config_data = read_json(str(config_file))
-        config_data["config_path"] = config_file
-
-        spritesheet_id = self._resolve_asset_id(
-            asset_id or config_data.get("id"),
-            config_data,
-            config_file,
-        )
-        image_path = config_data.get("image_path")
-        if not image_path:
-            raise ValueError(
-                f"image_path is required in spritesheet config '{config_file.name}'"
-            )
-
-        resolved_image_path = self._resolve_config_image_path(
-            str(image_path), config_file
-        )
-
-        if resolved_image_path.parent != config_file.parent:
-            logger.warning(
-                f"Disarankan file config '{config_file.name}' dan gambar "
-                f"{resolved_image_path.name!r} berada di folder yang sama."
-            )
-
-        if not resolved_image_path.is_file():
-            raise FileNotFoundError(f"Image file not found: {resolved_image_path}")
-
-        texture = self._loader.load_texture_from_dict(
-            config_data, image_path=resolved_image_path
-        )
-        self._cache_texture(spritesheet_id, texture)
-
-        regions = config_data.get("regions", {})
-        for region_id, region_data in regions.items():
-            if isinstance(region_data, list):
-                if len(region_data) != 4:
-                    raise ValueError(
-                        f"Region '{region_id}' must have 4 values for rect"
-                    )
-                rect = (
-                    float(region_data[0]),
-                    float(region_data[1]),
-                    float(region_data[2]),
-                    float(region_data[3]),
-                )
-            elif isinstance(region_data, dict):
-                rect_list = region_data.get("rect", [0, 0, 0, 0])
-                rect = (
-                    float(rect_list[0]),
-                    float(rect_list[1]),
-                    float(rect_list[2]),
-                    float(rect_list[3]),
-                )
-            else:
-                raise ValueError(
-                    f"Region '{region_id}' must be a list [x,y,w,h] or dict with rect"
-                )
-
-            t_data = TextureData(
-                parent_id=spritesheet_id,
-                texture=texture,
-                source_rect=rect,
-            )
-            self._register_region(region_id, t_data)
-
-        animation_groups = config_data.get("animation_groups", [])
-        if animation_groups:
-            animations = self.one("@Animations")
-            for group in animation_groups:
-                animations.load_animation(group)
-
-        self._regions[spritesheet_id] = set(regions.keys())
-        self._configs[spritesheet_id] = config_image_from_dict(
-            {
-                **config_data,
-                "id": spritesheet_id,
-                "type": "spritesheet",
-            },
-            config_path=config_file,
-            defaults=self._loader.default,
-        )
-        logger.info(
-            f"Spritesheet '{spritesheet_id}' berhasil dimuat dengan "
-            f"{len(regions)} region (config: {config_file.name})"
-        )
 
     # ------------------------------------------------------------------
     # Texture atlas (optional, in-memory)
@@ -1100,7 +1052,18 @@ class Assets(ServiceUnit):
             logger.warning(f"Gagal unload aset '{asset_id}': {error}")
 
     def render(
-        self, asset_id: str, *, z: int, layer: int, **kwargs: Unpack[_TextureParams]
+        self,
+        asset_id: str,
+        *,
+        z: float = 0.0,
+        layer: int = Layer.WORLD,
+        pos: PosType = (0.0, 0.0),
+        tint: ColorType = (255, 255, 255, 255),
+        rotation: float = 0.0,
+        scale: float = 1.0,
+        source: SourceRectType | None = None,
+        dest: RectType | None = None,
+        origin: Vec2Type = (0.0, 0.0),
     ):
         """Render the asset with the given ID.
 
@@ -1113,15 +1076,31 @@ class Assets(ServiceUnit):
             asset_id: The ID of the asset to render.
             z: The z value for render order.
             layer: The render layer used to determine draw order.
-            **kwargs: Additional texture render parameters (_TextureParams).
+            pos: Position of the sprite (x, y).
+            tint: Tint color (r, g, b, a).
+            rotation: Rotation in degrees.
+            scale: Uniform scale factor.
+            source: Source rectangle within the texture; defaults to the
+                asset's own region (spritesheet or atlas).
+            dest: Destination rectangle to draw into, if any.
+            origin: Rotation/scale origin offset (x, y).
         """
         t_data = self.get_texture_data(asset_id)
         logger.debug(
             f"Rendering aset '{asset_id}' pada z={z}, layer={layer} dengan "
-            f"params: {kwargs}"
+            f"params: pos = {pos} tint = {tint} rotation = {rotation} scale = {scale} "
+            f"source = {source} dest = {dest} origin = {origin}"
         )
 
-        source = kwargs.pop("source", None) or t_data.source_rect
         self.one("Renderer").render_sprite(
-            z=z, layer=layer, texture=t_data.texture, source=source, **kwargs
+            z=z,
+            layer=layer,
+            texture=t_data.texture,
+            source=source or t_data.source_rect,
+            pos=pos,
+            tint=tint,
+            rotation=rotation,
+            scale=scale,
+            dest=dest,
+            origin=origin,
         )

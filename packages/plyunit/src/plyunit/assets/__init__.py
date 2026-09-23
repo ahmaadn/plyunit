@@ -7,18 +7,15 @@ from .assets import Assets
 from .shaders import ShaderHandle, Shaders, ShaderUniform
 from .text import Text
 from .types import (
-    ConfigImage as ConfigImage,
-    ConfigTexture as ConfigTexture,
+    ImageConfig as ImageConfig,
+    ImageData as ImageData,
     ShapedText as ShapedText,
     ShapeKey as ShapeKey,
-    SpriteSheetAnimationConfig as SpriteSheetAnimationConfig,
     SpriteSheetConfig as SpriteSheetConfig,
-    SpriteSheetFrameConfig as SpriteSheetFrameConfig,
-    SpriteSheetGroupConfig as SpriteSheetGroupConfig,
     TemplateText as TemplateText,
+    TextureConfig as TextureConfig,
     TextureData as TextureData,
-    config_image_from_dict as config_image_from_dict,
-    config_texture_from_dict as config_texture_from_dict,
+    TextureProperty as TextureProperty,
 )
 
 __all__ = [
@@ -26,20 +23,17 @@ __all__ = [
     "AnimationFrame",
     "Animations",
     "Assets",
-    "ConfigImage",
-    "ConfigTexture",
+    "ImageConfig",
+    "ImageData",
     "ShaderHandle",
     "ShaderUniform",
     "Shaders",
     "ShapeKey",
     "ShapedText",
-    "SpriteSheetAnimationConfig",
     "SpriteSheetConfig",
-    "SpriteSheetFrameConfig",
-    "SpriteSheetGroupConfig",
     "TemplateText",
     "Text",
+    "TextureConfig",
     "TextureData",
-    "config_image_from_dict",
-    "config_texture_from_dict",
+    "TextureProperty",
 ]

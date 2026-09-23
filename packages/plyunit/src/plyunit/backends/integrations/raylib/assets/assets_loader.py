@@ -9,12 +9,7 @@ from typing import Any, Literal
 import pyray as pr
 import raylib as rl
 
-from plyunit.assets.types import (
-    ConfigImage,
-    ConfigTexture,
-    config_image_from_dict,
-    config_texture_from_dict,
-)
+from plyunit.assets.types import ImageData, TextureProperty
 from plyunit.core.types import ColorType, Texture
 
 __all__ = (
@@ -61,7 +56,7 @@ WRAP_MODE_MAP = {
     "repeat": rl.TEXTURE_WRAP_REPEAT,
 }
 
-default = ConfigTexture(
+default = TextureProperty(
     filter="nearest",
     wrap="clamp",
     mipmap=False,
@@ -384,14 +379,14 @@ def load_texture_from_image(image: Any) -> Texture:
 
 
 def load_texture_from_dict(
-    data: Mapping[str, Any] | ConfigImage,
+    data: Mapping[str, Any] | ImageData,
     *,
     image_path: Path | str | None = None,
 ) -> Texture:
-    """Load a texture from a config dict or ``ConfigImage``.
+    """Load a texture from a config dict or ``ImageData``.
 
     Args:
-        data: JSON config dictionary or ``ConfigImage`` instance.
+        data: JSON config dictionary or ``ImageData`` instance.
         image_path: Path to the image file (overrides the path in config).
 
     Returns:
@@ -400,36 +395,38 @@ def load_texture_from_dict(
     Raises:
         ValueError: If image_path is not provided.
     """
-    if isinstance(data, ConfigImage):
-        cfg = data
-    else:
-        cfg = config_image_from_dict(data, defaults=default)
 
-    resolved_path = image_path
-    if resolved_path is None and cfg.image_path:
-        resolved_path = cfg.image_path
+    cfg = (
+        data
+        if isinstance(data, ImageData)
+        else ImageData.from_dict(data, texture_default=default)
+    )
 
-    if resolved_path is None:
-        logger.error("Image path harus disediakan di config atau sebagai argument")
-        raise ValueError("Image path harus disediakan di config atau sebagai argument")
-
-    texture_cfg = config_texture_from_dict(cfg.texture, defaults=default)
-    path = Path(resolved_path) if isinstance(resolved_path, str) else resolved_path
+    path = image_path if image_path is not None else cfg.image_path
+    if not path:
+        logger.error(
+            "The image path must be provided in the configuration or as an argument."
+        )
+        raise ValueError(
+            "The image path must be provided in the configuration or as an argument."
+        )
+    if isinstance(path, str):
+        path = Path(path)
 
     logger.debug(
         f"Memuat tekstur dari dict dengan config: "
-        f"filter={texture_cfg.filter}, wrap={texture_cfg.wrap}, "
-        f"premultiply={texture_cfg.premultiply_alpha}, "
-        f"color_key={texture_cfg.color_key}"
+        f"filter={cfg.texture.filter}, wrap={cfg.texture.wrap}, "
+        f"premultiply={cfg.texture.premultiply_alpha}, "
+        f"color_key={cfg.texture.color_key}"
     )
 
     return load_texture(
         path,
-        alpha_premultiply=texture_cfg.premultiply_alpha,
-        filter_mode=texture_cfg.filter,
-        wrap_mode=texture_cfg.wrap,
-        mipmap=texture_cfg.mipmap,
-        color_key=texture_cfg.color_key,
+        alpha_premultiply=cfg.texture.premultiply_alpha,
+        filter_mode=cfg.texture.filter,
+        wrap_mode=cfg.texture.wrap,
+        mipmap=cfg.texture.mipmap,
+        color_key=cfg.texture.color_key,
     )
 
 
