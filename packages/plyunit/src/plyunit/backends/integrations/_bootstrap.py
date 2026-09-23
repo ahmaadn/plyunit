@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from plyunit.core.app import App, AppConfig
 
 
-def init(app: App, config: AppConfig | str | None = None) -> App:
+def init[T: App](app: T, config: AppConfig | str | None = None) -> T:
     """Wire ``app`` with the active backend's window + canvas + services.
 
     Sets ``app.window``, ``app.canvas``, ``app.renderer``,
