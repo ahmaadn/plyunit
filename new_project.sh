@@ -99,6 +99,8 @@ package = false
 
 [tool.uv.sources]
 plyunit = { workspace = true }
+
+[tool.pyrefly]
 EOF
 
 if [ "$ISOLATED" -eq 1 ]; then
