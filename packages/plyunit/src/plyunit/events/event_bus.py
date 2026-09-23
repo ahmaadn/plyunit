@@ -122,7 +122,7 @@ class EventBus(ServiceUnit):
     def subscribe(
         self,
         event_name: str,
-        listener: Callable[..., None],
+        listener: Callable[..., Any],
         *,
         priority: int = 0,
     ) -> None:
