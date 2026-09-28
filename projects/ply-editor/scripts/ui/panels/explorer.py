@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from imgui_bundle import imgui
+from imgui_bundle import icons_fontawesome_6 as icons_fa, imgui
 
 from scripts.project.file_tree import DirEntry, FileEntry, FileKind, FileTree
 from scripts.ui.panel import Panel
@@ -152,7 +152,6 @@ class ExplorerPanel(Panel):
         if self.relevant_only and not node.has_relevant():
             return
 
-        count = node.total_files(relevant_only=self.relevant_only)
         flags = int(
             imgui.TreeNodeFlags_.open_on_arrow
             | imgui.TreeNodeFlags_.open_on_double_click
@@ -161,30 +160,55 @@ class ExplorerPanel(Panel):
         if not node.children and not any(self._visible(f) for f in node.files):
             flags |= int(imgui.TreeNodeFlags_.leaf)
 
-        opened = imgui.tree_node_ex(
-            f"{node.name}  ({count})##dir_{node.relative}", flags
-        )
+        icon = icons_fa.ICON_FA_FOLDER_OPEN if node.is_open else icons_fa.ICON_FA_FOLDER
+        opened = imgui.tree_node_ex(f"{icon} {node.name}###dir_{node.relative}", flags)
+        if opened != node.is_open:
+            node.is_open = opened
+
         self._draw_dir_context_menu(node)
         if opened:
             self._draw_dir_children(node)
             imgui.tree_pop()
 
+    def _draw_file_row(
+        self, entry: FileEntry, text: str, *, selected: bool, enabled: bool
+    ) -> bool:
+        """Draw one file row with its label aligned to folder labels.
+
+        The row background/hit area comes from a selectable (or a dummy for
+        read-only files); the label is drawn manually at the same X where a
+        tree node would place its label, so files and folders line up.
+        """
+        style = imgui.get_style()
+        # Same height as a tree node row
+        height = imgui.get_text_line_height() + style.frame_padding.y * 2
+        origin = imgui.get_cursor_screen_pos()
+
+        clicked = False
+        if enabled:
+            clicked, _ = imgui.selectable(
+                f"##file_{entry.relative}", selected, 0, imgui.ImVec2(0, height)
+            )
+        else:
+            imgui.dummy(imgui.ImVec2(imgui.get_content_region_avail().x, height))
+
+        color = imgui.get_color_u32(
+            imgui.Col_.text if enabled else imgui.Col_.text_disabled
+        )
+        label_pos = imgui.ImVec2(
+            origin.x + imgui.get_tree_node_to_label_spacing(),
+            origin.y + style.frame_padding.y,
+        )
+        imgui.get_window_draw_list().add_text(label_pos, color, text)
+        return clicked
+
     def _draw_file(self, entry: FileEntry, *, label: str | None = None) -> None:
-        """Draw one file row as a read-only node or a selectable."""
+        """Draw one file row as a read-only row or a selectable."""
         text = f"{entry.icon} {label or entry.name}"
 
         if not entry.is_openable:
-            # Read-only file: shown so the project structure stays
-            # complete, but not interactive, to avoid promising an
-            # action that does not exist.
-            imgui.tree_node_ex(
-                f"{text}##file_{entry.relative}",
-                int(
-                    imgui.TreeNodeFlags_.leaf
-                    | imgui.TreeNodeFlags_.no_tree_push_on_open
-                    | imgui.TreeNodeFlags_.span_avail_width
-                ),
-            )
+            # Read-only: shown for a complete structure, but not interactive.
+            self._draw_file_row(entry, text, selected=False, enabled=False)
             imgui.set_item_tooltip(f"{entry.relative}\n(tidak dapat dibuka editor)")
             self._draw_file_context_menu(entry)
             return
@@ -192,16 +216,12 @@ class ExplorerPanel(Panel):
         is_active = self.active_path is not None and entry.path == self.active_path
         selected = self.selected == entry.relative or is_active
 
-        clicked, _ = imgui.selectable(f"{text}##file_{entry.relative}", selected)
+        clicked = self._draw_file_row(entry, text, selected=selected, enabled=True)
         imgui.set_item_tooltip(entry.relative)
         if clicked:
             self.selected = entry.relative
             self._activate(entry)
         self._draw_file_context_menu(entry)
-
-    # ------------------------------------------------------------------
-    # Actions
-    # ------------------------------------------------------------------
 
     def _activate(self, entry: FileEntry) -> None:
         """Open a file according to its kind."""

@@ -50,6 +50,7 @@ PAN_SPEED: Final = 600.0
 
 DATA_PATH: Final = Path(__file__).parent.parent / "data"
 FONT_PATH: Final = DATA_PATH / "fonts" / "Roboto-Regular.ttf"
+FONT_ICON_PATH: Final = DATA_PATH / "fonts" / "fa-solid-900.ttf"
 FONT_SIZE: Final = 18
 
 # Folder scanning

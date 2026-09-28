@@ -16,11 +16,25 @@ from scripts.assets import Assets
 
 
 def load_font() -> imgui.ImFont:
-    """Load Roboto as the main font, merging Font Awesome into it."""
-    return hello_imgui.load_font_ttf_with_font_awesome_icons(
-        str(const.FONT_PATH),
-        const.FONT_SIZE,
+    """Load Roboto as the main font, then merge Font Awesome with fixed-width glyphs."""
+    # 1) Font utama, tanpa merge
+    main_font = hello_imgui.load_font(
+        str(const.FONT_PATH), const.FONT_SIZE, hello_imgui.FontLoadingParams()
     )
+
+    # 2) Icon, digabung ke font terakhir dengan config sendiri
+    icon_cfg = imgui.ImFontConfig()
+    icon_cfg.glyph_min_advance_x = const.FONT_SIZE * 1.25
+
+    icon_params = hello_imgui.FontLoadingParams(
+        merge_to_last_font=True,
+        inside_assets=True,
+        font_config=icon_cfg,
+    )
+
+    hello_imgui.load_font(str(const.FONT_ICON_PATH), const.FONT_SIZE, icon_params)
+
+    return main_font
 
 
 def main() -> None:

@@ -77,7 +77,7 @@ class FileKind(Enum):
 KIND_ICONS: dict[FileKind, str] = {
     FileKind.IMAGE: icons_fa.ICON_FA_FILE_IMAGE,
     FileKind.MAP: icons_fa.ICON_FA_MAP,
-    FileKind.SIDECAR: icons_fa.ICON_FA_CODE,
+    FileKind.SIDECAR: icons_fa.ICON_FA_FILE_CODE,
     FileKind.OTHER: icons_fa.ICON_FA_FILE_CIRCLE_QUESTION,
     FileKind.ANIMATION: icons_fa.ICON_FA_FILM,
     FileKind.AUDIO: icons_fa.ICON_FA_FILE_AUDIO,
@@ -137,6 +137,7 @@ class DirEntry:
     relative: str
     children: dict[str, DirEntry] = field(default_factory=dict)
     files: list[FileEntry] = field(default_factory=list)
+    is_open: bool = field(default=False, init=False)
 
     def iter_files(self) -> Iterator[FileEntry]:
         """Yield every file in this node and its descendants."""
