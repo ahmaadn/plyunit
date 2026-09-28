@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pyray as pr
@@ -16,6 +17,8 @@ from scripts.project.file_tree import FileTree
 from scripts.project.project import Project
 from scripts.project.scan_worker import ScanWorker
 from scripts.ui.layer import ImGuiLayer
+
+logger = logging.getLogger(__name__)
 
 
 class EditorApp(plyunit.App):
@@ -34,6 +37,7 @@ class EditorApp(plyunit.App):
 
     def on_load(self) -> None:
         """Build services, wire events and hotkeys."""
+        self.first_load = True
         self.global_config = GlobalConfig.load()
         self.global_config.prune_missing()
         self.global_config.save()
@@ -86,6 +90,13 @@ class EditorApp(plyunit.App):
         self.window.begin_drawing()
         self.window.clear_background((255, 255, 255, 255))
 
+        if (
+            not self.first_load
+            and not self.project.active
+            and self.global_config.last_project
+        ):
+            self.open_last_project()
+
         # Main-thread editor work.
         self.scan_worker.poll()
 
@@ -105,14 +116,13 @@ class EditorApp(plyunit.App):
         self.mouse.update(dt)
         self.input.update(dt)
 
+        if self.first_load:
+            self.first_load = False
+
     @property
     def ui(self) -> plyunit.ImGui:
         """The engine ``ImGui`` service (draw callbacks, capture queries)."""
         return self._ui
-
-    # ------------------------------------------------------------------
-    # Actions
-    # ------------------------------------------------------------------
 
     def on_action_open_project(self) -> None:
         """Ask for a folder, open it as the project, and start scanning."""
@@ -120,15 +130,42 @@ class EditorApp(plyunit.App):
         if not path:
             return
 
-        self.scan_worker.cancel()
-        self.project.open_project(
-            Path(path), global_excludes=self.global_config.exclude_folders
-        )
-        self.scan_worker.start(self.project.root, self.project.excludes)
+        self._open_project(Path(path))
         self.context.set_status(
             f"Project '{self.project.project_name}' dibuka; memindai aset..."
             + (" (scaffold .ply-editor dibuat)" if self.project.created else "")
         )
+
+    def open_last_project(self):
+        if self.global_config.last_project is None:
+            return
+
+        path_last_project = Path(self.global_config.last_project)
+        if not path_last_project.exists():
+            logger.debug(
+                f"Cannot open last project : {self.global_config.last_project}"
+            )
+            self.global_config.last_project = None
+            self.global_config.prune_missing()
+            return
+
+        self._open_project(path_last_project)
+        logger.info(f"Open last project : {self.global_config.last_project}")
+
+    def _open_project(self, path: Path):
+        self.scan_worker.cancel()
+        self.project.open(
+            Path(path), global_excludes=self.global_config.exclude_folders
+        )
+
+        # save to global
+        self.global_config.touch_project(self.project.root, self.project.name)
+        self.scan_worker.start(self.project.root, self.project.excludes)
+        self.context.set_status("Open last project")
+
+    def on_unload(self):
+        self.global_config.save()
+        self.project.save()
 
     def on_action_save(self) -> None:
         """Persist the global config and the open project."""

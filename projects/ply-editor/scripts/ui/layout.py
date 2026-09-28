@@ -86,10 +86,6 @@ class DockLayout:
         self.show_tabs = False
         self.viewport = Rect(0.0, 0.0, 0.0, 0.0)
 
-    # ------------------------------------------------------------------
-    # Geometry
-    # ------------------------------------------------------------------
-
     @staticmethod
     def max_sidebar_width(total_width: float) -> float:
         """Return the maximum width of one sidebar for a given window width.
@@ -175,10 +171,6 @@ class DockLayout:
             viewport.work_size.x,
             STATUS_BAR_HEIGHT,
         )
-
-    # ------------------------------------------------------------------
-    # Window helpers
-    # ------------------------------------------------------------------
 
     @staticmethod
     def begin_fixed(

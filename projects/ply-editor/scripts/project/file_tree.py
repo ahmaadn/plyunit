@@ -243,8 +243,6 @@ class FileTree(plyunit.ServiceUnit):
         """Insert one scan entry into the tree under its parent folder."""
         parent_rel, _, name = entry.relative.rpartition("/")
         node = self._ensure_dir(parent_rel) if parent_rel else self.root
-        if kind == FileKind.OTHER:
-            print(node)
 
         asset_id = None
         if kind in (FileKind.IMAGE, FileKind.SIDECAR):
@@ -259,9 +257,7 @@ class FileTree(plyunit.ServiceUnit):
             kind=kind,
             asset_id=asset_id,
         )
-        if kind == FileKind.OTHER:
-            print("------------------------------\n\n")
-            print(file_entry)
+
         node.files.append(file_entry)
         self._by_relative[entry.relative] = file_entry
 

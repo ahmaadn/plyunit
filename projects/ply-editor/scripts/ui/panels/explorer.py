@@ -118,10 +118,6 @@ class ExplorerPanel(Panel):
             shown = tree.root.total_files(relevant_only=self.relevant_only)
             imgui.text_disabled(f"{shown} files - {self.root.name}")
 
-    # ------------------------------------------------------------------
-    # Tree
-    # ------------------------------------------------------------------
-
     def _visible(self, entry: FileEntry) -> bool:
         """Return whether a file passes the relevance filter."""
         return not self.relevant_only or entry.kind.is_relevant

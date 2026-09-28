@@ -97,10 +97,6 @@ class GlobalConfig:
         default_factory=lambda: list(const.DEFAULT_EXCLUDES)
     )
 
-    # -----------------------------------------------------------------
-    # Recents
-    # -----------------------------------------------------------------
-
     def touch_project(self, path: str | Path, name: str | None = None) -> None:
         """Record a project as just opened.
 
@@ -145,10 +141,6 @@ class GlobalConfig:
             return None
         p = Path(self.last_project)
         return p if p.is_dir() else None
-
-    # -----------------------------------------------------------------
-    # (De)serialization
-    # -----------------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to the on-disk representation."""

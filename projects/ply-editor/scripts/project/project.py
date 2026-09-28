@@ -45,10 +45,10 @@ class Project(plyunit.ServiceUnit):
 
     def __init__(self) -> None:
         super().__init__("Project", tags={"project", "service"})
-        self._root: Path = Path("")
-        self._config: ProjectConfig = ProjectConfig("No Project")
-        self._editor: EditorConfig = EditorConfig()
-        self._excludes: ExcludeRules = ExcludeRules()
+        self._root: Path | None = None
+        self._config: ProjectConfig | None = None
+        self._editor: EditorConfig | None = None
+        self._excludes: ExcludeRules | None = None
         self._scan_result: ScanResult | None = None
         self._created = False
         self.active = False
@@ -60,21 +60,37 @@ class Project(plyunit.ServiceUnit):
     @property
     def root(self) -> Path:
         """Absolute project root folder."""
+        if not self._root:
+            raise RuntimeError(
+                "No project is open. Open a folder via File -> Open Project first."
+            )
         return self._root
 
     @property
     def config(self) -> ProjectConfig:
         """Contents of ``project.json``."""
+        if not self._config:
+            raise RuntimeError(
+                "No project is open. Open a folder via File -> Open Project first."
+            )
         return self._config
 
     @property
     def editor(self) -> EditorConfig:
         """Contents of ``editor.json`` (UI state)."""
+        if not self._editor:
+            raise RuntimeError(
+                "No project is open. Open a folder via File -> Open Project first."
+            )
         return self._editor
 
     @property
     def excludes(self) -> ExcludeRules:
         """Effective exclude rules."""
+        if not self._excludes:
+            raise RuntimeError(
+                "No project is open. Open a folder via File -> Open Project first."
+            )
         return self._excludes
 
     @property
@@ -85,14 +101,14 @@ class Project(plyunit.ServiceUnit):
     @property
     def project_name(self) -> str:
         """Project display name (from ``project.json``)."""
-        return self._config.name
+        return self.config.name
 
     @property
     def created(self) -> bool:
         """True when the ``.ply-editor/`` scaffold was just created."""
         return self._created
 
-    def open_project(
+    def open(
         self,
         path: str | Path,
         *,
@@ -211,3 +227,21 @@ class Project(plyunit.ServiceUnit):
         self.config.save_config(project_dir / const.PROJECT_CONFIG_NAME)
         self.editor.save_config(project_dir / const.EDITOR_CONFIG_NAME)
         logger.info(f"Project save done in : {project_dir}")
+
+    def unload(self):
+        self.save()
+
+        # pyrefly: ignore [bad-assignment]
+        self._root: Path = None
+        # pyrefly: ignore [bad-assignment]
+        self._config: ProjectConfig = None
+        # pyrefly: ignore [bad-assignment]
+        self._editor: EditorConfig = None
+        # pyrefly: ignore [bad-assignment]
+        self._excludes: ExcludeRules = None
+        self._scan_result: ScanResult | None = None
+        self._created = False
+        self.active = False
+
+        assets = self.one("@Assets")
+        assets.clear_all()
