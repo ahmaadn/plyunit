@@ -1,3 +1,9 @@
-/**
+/*
+
+ply-editor/data/.ply-editor/
+ply-editor/.ply-editor/
+.ply-editor/
+
 !.gitkeep
 !.gitignore
+!ply-editor/

@@ -1,0 +1,17 @@
+[project]
+name = "ply-editor"
+version = "0.1.0"
+description = "ply-editor - a plyunit project"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = ["plyunit[raylib,native,imgui]"]
+
+# The project itself is plain source code (run via `uv run python`), never
+# built or installed as a package.
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+plyunit = { workspace = true }
+
+[tool.pyrefly]

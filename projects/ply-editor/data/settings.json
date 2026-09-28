@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "recent_projects": [],
+  "last_project": null,
+  "window_width": 1280,
+  "window_height": 800,
+  "window_maximized": false,
+  "exclude_folders": [
+    ".git",
+    ".hg",
+    ".svn",
+    ".venv",
+    "venv",
+    ".env",
+    "node_modules",
+    "__pycache__",
+    ".dist",
+    "dist",
+    "build",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "*.egg-info",
+    ".idea",
+    ".vscode"
+  ]
+}

@@ -20,3 +20,5 @@ logs/*
 
 # MkDocs build output
 site/
+
+.ply-editor/
