@@ -18,6 +18,7 @@ from scripts import events
 from scripts.context import StatusType
 from scripts.ui.layout import STATUS_BAR_HEIGHT, DockLayout
 from scripts.ui.panels.explorer import ExplorerPanel
+from scripts.ui.screens.start_screen import StartScreen
 
 if TYPE_CHECKING:
     from app import EditorApp
@@ -34,17 +35,24 @@ class ImGuiLayer(plyunit.ServiceUnit):
         AttributeError: When the app has no ImGui service bound.
     """
 
-    def __init__(self, app: EditorApp) -> None:
+    def __init__(self) -> None:
         super().__init__("ImGuiLayer")
-        self._ui = app.ui
-        self.ctx = app.context
         self.layout = DockLayout()
-        self._ui.add_draw(self.draw)
         self.explorer = ExplorerPanel()
 
-    def on_attach(self, app) -> None:
+    def on_attach(self, app: EditorApp) -> None:
         """Resolve the event bus for menu actions."""
+        self.app = app
         self.bus = cast(plyunit.EventBus, app.one("@EventBus"))
+        self.project = app.one("@Project")
+
+        self._ui = app.ui
+        self._ui.add_draw(self.draw)
+        self.ctx = app.context
+
+        self.start_screen = StartScreen(
+            app, app._open_project, app.on_action_open_project
+        )
 
     @property
     def ui(self) -> plyunit.ImGui:
@@ -60,6 +68,11 @@ class ImGuiLayer(plyunit.ServiceUnit):
 
     def draw(self) -> None:
         """Draw one full editor chrome frame."""
+        if not self.app.project.active and self.app.global_config.last_project is None:
+            if self.start_screen is not None:
+                self.start_screen.draw()
+            return
+
         self.draw_menu_bar()
         left, center, right = self.layout.compute()
 

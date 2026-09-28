@@ -63,8 +63,8 @@ class EditorApp(plyunit.App):
             raise RuntimeError("Install ImGui")
         self._ui = ui
 
-        self.layer = ImGuiLayer(self)
         self.project = Project()
+        self.layer = ImGuiLayer()
         self.file_tree = FileTree()
         self.scan_worker = ScanWorker()
 
@@ -137,6 +137,12 @@ class EditorApp(plyunit.App):
         )
 
     def open_last_project(self):
+        """Reopen the project recorded as most recently used.
+
+        Does nothing when no last project is recorded. When the recorded
+        folder no longer exists, it is cleared and pruned from the
+        recent list instead of being opened.
+        """
         if self.global_config.last_project is None:
             return
 
@@ -153,6 +159,15 @@ class EditorApp(plyunit.App):
         logger.info(f"Open last project : {self.global_config.last_project}")
 
     def _open_project(self, path: Path):
+        """Open ``path`` as the project and start the background scan.
+
+        Cancels any running scan, opens the folder with the global
+        exclude rules, records it in the global config as most recently
+        used, and starts scanning the project root.
+
+        Args:
+            path: Folder to open as the project.
+        """
         self.scan_worker.cancel()
         self.project.open(
             Path(path), global_excludes=self.global_config.exclude_folders
@@ -164,8 +179,10 @@ class EditorApp(plyunit.App):
         self.context.set_status("Open last project")
 
     def on_unload(self):
+        """Persist the global config and the open project on shutdown."""
         self.global_config.save()
-        self.project.save()
+        if self.project.active:
+            self.project.save()
 
     def on_action_save(self) -> None:
         """Persist the global config and the open project."""
