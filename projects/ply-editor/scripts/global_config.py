@@ -1,10 +1,11 @@
-"""Konfigurasi global editor (lintas project).
+"""Editor-wide (cross-project) configuration.
 
-Disimpan di ``scripts/data/settings.json`` (lokal, dapat dikomit-tolak). Berisi
-daftar project terakhir dibuka, project aktif terakhir, dan geometri window.
+Stored in ``data/settings.json`` inside the editor project (local,
+never published). It holds the recently opened projects, the last
+active project, window geometry, and global scan excludes.
 
-Konfigurasi ini **tidak pernah** menggagalkan startup: file rusak atau hilang
-selalu jatuh ke nilai default, dengan file lama dicadangkan sebagai ``.bak``.
+This config **never** fails startup: a missing or corrupt file always
+falls back to defaults, with the old file backed up as ``.bak``.
 """
 
 from __future__ import annotations
@@ -13,27 +14,27 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
-import scripts.constants as const
+from scripts import constants as const
 from scripts.exclude import normalize_patterns
-from scripts.utils import read_json_safe, write_json_atomic
+from scripts.json_io import read_json_safe, write_json_atomic
 
 logger = logging.getLogger(__name__)
 
-SETTINGS_FILENAME = "settings.json"
-GLOBAL_CONFIG_DIR = Path(__file__).parent.parent / "data"
-GLOBAL_CONFIG_PATH = GLOBAL_CONFIG_DIR / SETTINGS_FILENAME
+SETTINGS_FILENAME: Final = "settings.json"
+GLOBAL_CONFIG_DIR: Final = Path(__file__).parent.parent / "data"
+GLOBAL_CONFIG_PATH: Final = GLOBAL_CONFIG_DIR / SETTINGS_FILENAME
 
 
 @dataclass(slots=True)
 class RecentProject:
-    """Satu entri project yang pernah dibuka.
+    """One previously opened project entry.
 
     Attributes:
-        path: Path absolut folder project.
-        name: Nama tampilan project.
-        opened_at: Unix timestamp terakhir dibuka (detik).
+        path: Absolute path of the project folder.
+        name: Project display name.
+        opened_at: Unix timestamp (seconds) of the last open.
     """
 
     path: str
@@ -41,11 +42,12 @@ class RecentProject:
     opened_at: float = 0.0
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize to the on-disk representation."""
         return {"path": self.path, "name": self.name, "opened_at": self.opened_at}
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> RecentProject | None:
-        """Bangun dari dict; ``None`` bila entri tidak dapat dipakai."""
+        """Build from a dict; ``None`` when the entry is unusable."""
         raw_path = data.get("path")
         if not isinstance(raw_path, str) or not raw_path.strip():
             return None
@@ -62,7 +64,7 @@ class RecentProject:
 
     @property
     def exists(self) -> bool:
-        """True bila folder project masih ada di disk."""
+        """True when the project folder still exists on disk."""
         try:
             return Path(self.path).is_dir()
         except OSError:
@@ -71,15 +73,18 @@ class RecentProject:
 
 @dataclass(slots=True)
 class GlobalConfig:
-    """Konfigurasi global editor.
+    """Editor-wide configuration.
 
     Attributes:
-        version: Versi skema file.
-        recent_projects: Daftar project terakhir (terbaru di depan).
-        last_project: Path project yang dibuka terakhir kali.
-        window: Geometri window tersimpan.
-        exclude_folders: Pola folder yang dilewati saat memindai project.
-            Berlaku untuk semua project kecuali di-override per project.
+        version: Schema version of the file.
+        recent_projects: Recently opened projects (newest first).
+        last_project: Path of the project opened last time.
+        window_width: Saved window width.
+        window_height: Saved window height.
+        window_maximized: Whether the window was maximized.
+        exclude_folders: Folder patterns skipped when scanning a
+            project. Applies to all projects unless overridden per
+            project.
     """
 
     version: int = const.GLOBAL_CONFIG_VERSION
@@ -92,19 +97,19 @@ class GlobalConfig:
         default_factory=lambda: list(const.DEFAULT_EXCLUDES)
     )
 
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------
     # Recents
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------
 
     def touch_project(self, path: str | Path, name: str | None = None) -> None:
-        """Catat project sebagai baru saja dibuka.
+        """Record a project as just opened.
 
-        Memindahkan entri ke posisi teratas, memperbarui timestamp, dan
-        memangkas daftar ke :data:`MAX_RECENT_PROJECTS`.
+        Moves the entry to the front, updates its timestamp, and trims
+        the list to :data:`~scripts.constants.MAX_RECENT_PROJECTS`.
 
         Args:
-            path: Path folder project.
-            name: Nama tampilan (default: nama folder).
+            path: Project folder path.
+            name: Display name (default: folder name).
         """
         resolved = str(Path(path).resolve())
         display = name or Path(resolved).name or resolved
@@ -116,17 +121,17 @@ class GlobalConfig:
         self.last_project = resolved
 
     def remove_project(self, path: str | Path) -> None:
-        """Hapus satu project dari daftar recents."""
+        """Remove one project from the recents list."""
         resolved = str(Path(path).resolve())
         self.recent_projects = [r for r in self.recent_projects if r.path != resolved]
         if self.last_project == resolved:
             self.last_project = None
 
     def prune_missing(self) -> int:
-        """Buang entri recents yang foldernya sudah tidak ada.
+        """Drop recents whose folders no longer exist.
 
         Returns:
-            Jumlah entri yang dibuang.
+            The number of dropped entries.
         """
         before = len(self.recent_projects)
         self.recent_projects = [r for r in self.recent_projects if r.exists]
@@ -135,13 +140,18 @@ class GlobalConfig:
         return before - len(self.recent_projects)
 
     def valid_last_project(self) -> Path | None:
-        """Path project terakhir bila masih valid, selain itu ``None``."""
+        """Return the last project path when still valid, else ``None``."""
         if not self.last_project:
             return None
         p = Path(self.last_project)
         return p if p.is_dir() else None
 
+    # -----------------------------------------------------------------
+    # (De)serialization
+    # -----------------------------------------------------------------
+
     def to_dict(self) -> dict[str, Any]:
+        """Serialize to the on-disk representation."""
         return {
             "version": const.GLOBAL_CONFIG_VERSION,
             "recent_projects": [r.to_dict() for r in self.recent_projects],
@@ -154,7 +164,7 @@ class GlobalConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> GlobalConfig:
-        """Bangun dari dict, mentoleransi field hilang / bertipe salah."""
+        """Build from a dict, tolerating missing or mistyped fields."""
         out = cls()
         try:
             out.version = int(data.get("version", const.GLOBAL_CONFIG_VERSION))
@@ -183,8 +193,9 @@ class GlobalConfig:
         if window_maximized := data.get("window_maximized"):
             out.window_maximized = window_maximized
 
-        # Field absen berarti config lama: pakai default. List kosong yang
-        # eksplisit dihormati (user sengaja mematikan semua exclude).
+        # A missing field means an old config: keep the default. An
+        # explicit empty list is honored (the user disabled all
+        # excludes on purpose).
         if "exclude_folders" in data:
             raw_excludes = data.get("exclude_folders")
             if isinstance(raw_excludes, list):
@@ -193,16 +204,17 @@ class GlobalConfig:
 
     @classmethod
     def load(cls, path: Path | None = None) -> GlobalConfig:
-        """Muat config global dari disk.
+        """Load the global config from disk.
 
-        Tidak pernah melempar: file hilang / rusak / tak terbaca menghasilkan
-        config default (file rusak dicadangkan lebih dulu).
+        Never raises: a missing / corrupt / unreadable file yields a
+        default config (the corrupt file is backed up first).
 
         Args:
-            path: Override path file (default: :func:`global_config_path`).
+            path: Optional path override (default:
+                :data:`GLOBAL_CONFIG_PATH`).
 
         Returns:
-            :class:`GlobalConfig` yang siap dipakai.
+            A ready-to-use :class:`GlobalConfig`.
         """
         p = path or GLOBAL_CONFIG_PATH
         result = read_json_safe(p)
@@ -211,20 +223,16 @@ class GlobalConfig:
         return cls.from_dict(result)
 
     def save(self, path: Path | None = None) -> bool:
-        """Tulis config global secara atomik.
-
-        Menulis ke file sementara di direktori yang sama lalu ``os.replace``
-        agar tidak ada file setengah tertulis bila proses mati.
+        """Write the global config atomically.
 
         Args:
-            config: Config yang akan ditulis.
-            path: Override path file.
+            path: Optional path override.
 
         Returns:
-            True bila berhasil ditulis.
+            True when the write succeeded.
         """
         p = path or GLOBAL_CONFIG_PATH
         return write_json_atomic(p, self.to_dict())
 
 
-__all__ = ["GlobalConfig", "RecentProject"]
+__all__ = ["GLOBAL_CONFIG_DIR", "GLOBAL_CONFIG_PATH", "GlobalConfig", "RecentProject"]

@@ -1,3 +1,11 @@
+"""Editor asset index built from project scan results.
+
+Unlike :class:`plyunit.Assets`, which loads folders, this subclass
+loads from :class:`~scripts.project.scan.ScanResult` so there is no
+second disk traversal. The asset base path is set to the project root
+by :meth:`~scripts.project.project.Project.open_project`.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -5,8 +13,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import plyunit
-import scripts.constants as const
 from plyunit.utils import read_json
+from scripts import constants as const
 
 if TYPE_CHECKING:
     from scripts.project.scan import ScanEntry, ScanResult
@@ -15,23 +23,18 @@ logger = logging.getLogger(__name__)
 
 
 class Assets(plyunit.Assets):
-    """Assets editor berbasis hasil pemindaian project.
-
-    Berbeda dari :class:`plyunit.Assets` yang memuat folder, kelas ini memuat
-    dari :class:`~scripts.project.scan.ScanResult` sehingga tidak ada traversal
-    disk kedua. Path dasar aset di-set ke root project oleh
-    :meth:`scripts.project.project.Project.open_project`.
-    """
+    """Asset index fed by project scans."""
 
     def load_from_scan(self, scan: ScanResult) -> None:
-        """Muat semua aset dari hasil pemindaian project.
+        """Load every asset from a project scan result.
 
-        Config gambar diproses lebih dulu (gambar yang dipakai config tidak
-        dimuat ulang sebagai aset standalone). JSON yang gagal dipakai sebagai
-        config dikembalikan ke daftar ``json_files`` agar tetap muncul di tree.
+        Image configs are processed first (images referenced by a
+        config are not loaded again as standalone assets). Configs that
+        fail to load are moved back to ``json_files`` so they still
+        appear in the file tree.
 
         Args:
-            scan: Hasil :func:`scripts.project.scan.scan_project`.
+            scan: Result of :func:`~scripts.project.scan.scan_project`.
         """
         images = scan.images
         image_config = list(scan.image_configs)
@@ -55,26 +58,28 @@ class Assets(plyunit.Assets):
         )
 
     def _resolve_config_image_path(self, image_path: str, config_path: Path) -> Path:
-        """Resolusi ``image_path`` sebuah config, prioritas sidecar.
+        """Resolve a config's ``image_path``, preferring sidecars.
 
-        Engine membatasi gambar config ke ``_asset_base_path`` dan justru
-        menolak sidecar yang sah (mis. config di ``data/tile/tileset.json``
-        menunjuk ``tile/tileset.png``). Karena di editor base path di-set ke
-        root project dan pemindaian sudah membatasi ke pohon project, di sini
-        urutan kandidat adalah:
+        The engine restricts config images to ``_asset_base_path`` and
+        therefore rejects legitimate sidecars (e.g. a config at
+        ``data/tile/tileset.json`` pointing at ``tile/tileset.png``).
+        Since the editor sets the base path to the project root and the
+        scan is already limited to the project tree, the candidate
+        order here is:
 
-        1. Path absolut apa adanya.
-        2. Relatif terhadap folder config (sidecar lengkap).
-        3. Nama file di samping config (sidecar nama saja).
-        4. Relatif terhadap base path (kompatibel dengan config lama).
+        1. The path as-is, when absolute.
+        2. Relative to the config's folder (full sidecar).
+        3. The file name next to the config (name-only sidecar).
+        4. Relative to the base path (legacy configs).
 
         Args:
-            image_path: Nilai ``image_path`` dari JSON config.
-            config_path: Path file JSON config.
+            image_path: ``image_path`` value from the config JSON.
+            config_path: Path of the config JSON file.
 
         Returns:
-            Kandidat pertama yang ada di disk; bila tidak ada, kandidat
-            sidecar pertama (agar pesan error menunjuk lokasi yang wajar).
+            The first candidate that exists on disk; when none exists,
+            the first sidecar candidate (so the error message points
+            somewhere sensible).
         """
         raw = Path(image_path)
         candidates: list[Path] = []
@@ -91,18 +96,28 @@ class Assets(plyunit.Assets):
                 return candidate
         return candidates[0]
 
-    def _load_image_configs(self, image_config: list[ScanEntry]):
-        remove_scan = set()
-        loaded_image_paths = set()
+    def _load_image_configs(
+        self, image_config: list[ScanEntry]
+    ) -> tuple[set[Path], set[ScanEntry]]:
+        """Load every image config; collect what succeeded and what did not.
+
+        Args:
+            image_config: Image-config scan entries.
+
+        Returns:
+            Tuple ``(loaded_image_paths, failed_configs)`` — absolute
+            image paths loaded via configs, and config entries that
+            must be demoted back to plain JSON files.
+        """
+        failed_configs: set[ScanEntry] = set()
+        loaded_image_paths: set[Path] = set()
         for config in image_config:
             try:
                 config_data = read_json(str(config.path))
 
                 if "image_path" not in config_data or not config_data["image_path"]:
                     logger.debug(f"image_path is required in config : '{config.path}'")
-
-                    # convert to other type
-                    remove_scan.add(config)
+                    failed_configs.add(config)
                     continue
 
                 config_data["config_path"] = config.path
@@ -120,7 +135,7 @@ class Assets(plyunit.Assets):
                         f"File gambar '{image_path.name}' "
                         f"tidak ada (config: '{config.path.name}')"
                     )
-                    remove_scan.add(config)
+                    failed_configs.add(config)
                     continue
 
                 loaded_image_paths.add(image_path.absolute())
@@ -132,9 +147,9 @@ class Assets(plyunit.Assets):
 
             except Exception as error:
                 logger.error(f"Gagal memproses config '{config.path.name}': {error}")
-                remove_scan.add(config)
+                failed_configs.add(config)
 
-        return loaded_image_paths, remove_scan
+        return loaded_image_paths, failed_configs
 
     def _load_scan_images(
         self,
@@ -142,14 +157,15 @@ class Assets(plyunit.Assets):
         *,
         loaded_image_paths: set[Path],
     ) -> int:
-        """Muat gambar standalone (yang tidak dipakai config).
+        """Load standalone images (those not used by a config).
 
         Args:
-            images: Seluruh gambar hasil pemindaian.
-            loaded_image_paths: Path absolut gambar yang sudah dimuat lewat config.
+            images: All images found by the scan.
+            loaded_image_paths: Absolute paths of images already loaded
+                via a config.
 
         Returns:
-            Jumlah gambar standalone yang berhasil dimuat.
+            The number of standalone images loaded.
         """
         standalone_count = 0
 
@@ -174,7 +190,16 @@ class Assets(plyunit.Assets):
 
         return standalone_count
 
-    def get_asset_id_by_path(self, scan: ScanEntry):
+    def get_asset_id_by_path(self, scan: ScanEntry) -> str | None:
+        """Return the asset id owning a scan entry, if any.
+
+        Args:
+            scan: A file found by the scan.
+
+        Returns:
+            The asset id when the file is a config or a known image of
+            some asset; ``None`` otherwise.
+        """
         for asset_id, config in self._configs.items():
             if (scan.suffix == ".json" and config.config_path == scan.path) or (
                 scan.suffix in const.IMAGE_EXTENSIONS and config.image_path == scan.path

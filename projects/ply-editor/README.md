@@ -1,61 +1,61 @@
-# simple-editor
+# ply-editor
 
-An **editor application base** on plyunit + Dear ImGui: dock layout,
-element system, state hub, undo/redo, settings persistence and hotkeys —
-without any domain features. Build your editor on top by filling in the
-marked seams.
+A **map-editor application** built on plyunit + Dear ImGui: project
+scanning, an asset index, a VS Code-style file explorer, and an IDE
+dock layout. Run it from the monorepo root:
 
-    uv run python projects/simple-editor/main.py
+    uv run python projects/ply-editor/main.py
 
 ## Architecture
 
-Three objects split responsibilities. Dependencies flow one way:
-**UI → Context → your model**.
+Responsibilities are split one way: **UI -> context -> project model**.
 
 ```
-EditorApp (main.py)          engine lifecycle: window, scenes, render pipeline
-├── AppContext (context.py)  STATE   — settings, history, viewport, layout,
-│                                       status + your intents
-├── ImGuiLayer (layer.py)    BRIDGE  — engine @ImGui service: frame(dt),
-│                                       draw callbacks, input-capture gates
-└── EditorShell (shell.py)   UI      — dock layout, elements, hotkeys
+main.py                          entrypoint: bootstrap + font loading
+app.py                           EditorApp — engine lifecycle, input, actions
+ply_editor/
+├── context.py                   AppContext — shared state hub + intents
+├── constants.py / events.py     constants and event-bus topic names
+├── global_config.py             GlobalConfig — cross-project settings
+│                                (data/settings.json)
+├── dialogs.py                   native open/save dialogs (headless-safe)
+├── exclude.py                   scan-exclude glob parsing and merging
+├── json_io.py                   safe/atomic JSON persistence helpers
+├── assets.py                    Assets — asset index built from scans
+├── project/
+│   ├── project.py               Project — open/save a folder as a project
+│   ├── configs.py               project.json / editor.json dataclasses
+│   ├── scan.py                  one-pass folder scan with pruning
+│   ├── scan_worker.py           background ScanJob + main-thread worker
+│   └── file_tree.py             full project file tree for the explorer
+└── ui/
+    ├── layer.py                 ImGuiLayer — menu, toolbar, sidebars, status
+    ├── layout.py                DockLayout — fixed IDE layout + splitters
+    ├── panel.py                 Panel — abstract base for editor panels
+    └── panels/explorer.py       ExplorerPanel — VS Code-style file tree
 ```
 
-- **`AppContext`** is the single state hub. Elements never talk to each
-  other; they read state from the context and trigger *intents*
-  (`undo`, `set_status`, plus whatever you add) so the menu bar,
-  toolbar, hotkeys and tools share one code path.
-- **`ImGuiLayer`** is deliberately thin — it resolves the `@ImGui`
-  service, forwards draw callbacks, and exposes `frame(dt)` plus
-  `want_capture_mouse()/want_capture_keyboard()`. It knows nothing about
-  panels.
-- **`EditorShell`** owns the dock layout, the element tree and global
-  hotkeys, and registers exactly one draw callback with the layer.
+- **`EditorApp`** owns the frame pipeline, services, event wiring, and
+  hotkeys (Ctrl+S saves).
+- **`AppContext`** is the single state hub. Panels read state from the
+  context and trigger *intents*; they never talk to each other.
+- **`ImGuiLayer`** is the bridge to the engine `@ImGui` service and
+  draws the whole editor chrome in one registered draw callback.
 
-## File map
+## Opening a project
 
-```
-scripts/
-├── context.py     AppContext — shared state + intents        [extend me]
-├── shell.py       EditorShell — layout, elements, hotkeys    [extend me]
-├── layer.py       ImGuiLayer — engine ImGui service bridge
-├── panel.py       Element — base class (docked / floating)
-├── layout.py      DockLayout — IDE layout, splitters, viewport rect
-├── viewport.py    Viewport — pan/zoom camera math
-├── commands.py    CommandStack + CallableCommand — undo/redo
-├── settings.py    EditorSettings — .ryeditor/editor.json
-├── dialogs.py     native open/save dialogs (headless-safe)
-├── panels/
-│   ├── main_menu_bar.py     File / Edit / View / Help        [extend me]
-│   ├── toolbar.py           example action row               [extend me]
-│   ├── status_bar.py        status message + FPS
-│   ├── placeholder_panel.py copy this to write a docked panel
-│   ├── viewport_panel.py    transparent center + camera demo
-│   ├── stats_panel.py       floating: engine metrics + pause
-│   └── demo_panel.py        floating: Dear ImGui demo window
-├── main_scene.py  preview scene rendered behind the UI
-└── player.py      example unit
-```
+`File -> Project Baru / Buka Folder...` opens any folder as a project:
+
+1. A `.ply-editor/` scaffold is created when missing, holding
+   `project.json` (project settings) and `editor.json` (UI state).
+2. Exclude rules merge the global defaults with per-project overrides;
+   `ALWAYS_EXCLUDED` (`.ply-editor/`, `.git`) can never be disabled.
+3. A background thread scans the folder once, pruning excluded
+   folders, classifying images/maps/animation configs/sidecars/fonts/
+   audio.
+4. The main thread picks the result up each frame: assets load into
+   the index, the file tree builds from the same scan (no second disk
+   traversal), and the explorer panel refreshes.
 
 ## Frame flow
 
@@ -64,52 +64,20 @@ renderer.reset_frame()
 window.begin_drawing() / clear
 scene_manager.render(renderer)      # game preview behind the UI
 renderer.flush_all()
-layer.frame(dt)                     # shell draws:
-                                    #   menu → toolbar → status → sidebars
-                                    #   → splitter → viewport → debug windows
+layer draw callback                 # menu → toolbar → sidebars →
+                                    #   splitters → status bar
 window.end_drawing()
 ```
 
-The viewport window is **fully transparent**, so the raylib render behind
-it stays visible; grid, gizmos and world content you draw with the ImGui
-draw list appear in the same frame as the input that changed them.
-
-## Extending
-
-**Add a panel** — copy `panels/placeholder_panel.py`, implement `draw()`
-with content only (the shell wraps it in `begin`/`end` at its dock rect),
-then instantiate it in `EditorShell.__init__` and call
-`draw_window(rect)` in `draw()`. Floating panels manage their own window
-(`floating=True`) and are drawn while `visible` — wire toggles into the
-View → Debug menu automatically.
-
-**Add state and intents** — put fields on `AppContext` (document,
-selection, active tool, …) and methods for every mutation; route menu,
-toolbar and hotkey handlers through those methods.
-
-**Add hotkeys** — extend `EditorShell._handle_hotkeys()` (skips while a
-text field has focus).
-
-**Add undoable actions** — implement the `Command` protocol (`apply` /
-`revert` / `label`) and `context.history.push(cmd)`. The Edit menu and
-Ctrl+Z / Ctrl+Y pick it up automatically.
-
-**Add file IO** — `dialogs.open_file()/save_file()` return a path or
-`None` (no tkinter / cancelled), safe to call from menus.
-
-## Controls
-
-| Input | Action |
-| --- | --- |
-| Middle drag | Pan the viewport camera |
-| Wheel | Zoom around the cursor |
-| `Ctrl+Z` / `Ctrl+Y` | Undo / redo (Edit menu) |
-
 ## Files on disk
 
-- `.ryeditor/editor.json` — sidebar widths, right-sidebar split,
-  visibility toggles. Written on exit, loaded on start; unknown keys are
-  ignored so adding settings fields is safe.
+- `data/settings.json` — global editor settings: recent projects,
+  window geometry, global scan excludes. Written atomically; a corrupt
+  file falls back to defaults (the old file is kept as `.bak`).
+- `<project>/.ply-editor/project.json` — per-project settings,
+  including map defaults and per-project exclude patterns.
+- `<project>/.ply-editor/editor.json` — per-project editor UI state
+  (camera, grid toggles, panels, sidebar widths). Unknown keys are
+  preserved across rewrites.
 
-Docs: `docs/en/imgui.md`; tutorial: `TUTORIAL_IMGUI.md` (§21 covers this
-architecture).
+Docs: `docs/en/imgui.md`; tutorial: `TUTORIAL_IMGUI.md`.

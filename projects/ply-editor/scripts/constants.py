@@ -1,56 +1,64 @@
+"""Application-wide constants for the editor."""
+
 from pathlib import Path
 from typing import Final
 
-# Project
+# Application
 # ---------------------------------------------
+
 APP_NAME: Final = "ply-editor"
 
 PROJECT_DIR_NAME: Final = ".ply-editor"
+"""Editor scaffold folder created inside every opened project."""
+
 PROJECT_CONFIG_NAME: Final = "project.json"
 EDITOR_CONFIG_NAME: Final = "editor.json"
 AUTOTILE_DIR_NAME: Final = "autotiles"
 
-MAX_RECENT_PROJECTS = 20
+MAX_RECENT_PROJECTS: Final = 20
 
-# VERSION
-# ---------------------------------------------
+# Config schema versions
 PROJECT_CONFIG_VERSION: Final = 1
 EDITOR_CONFIG_VERSION: Final = 1
 GLOBAL_CONFIG_VERSION: Final = 1
 
-
-# Windows
+# Window / camera
 # ---------------------------------------------
-CAMERA_VIRTUAL_WIDTH: Final = 640
-CAMERA_VIRTUAL_HEIGHT: Final = 400
 
 WINDOW_WIDTH: Final = 1280
 WINDOW_HEIGHT: Final = 800
 
+CAMERA_VIRTUAL_WIDTH: Final = 640
+CAMERA_VIRTUAL_HEIGHT: Final = 400
+
 FPS: Final = 60
 
-# EDITOR
+# Editor canvas
 # ---------------------------------------------
-# Di bawah ini grid tile disembunyikan (zoom-out terlalu jauh)
+
 GRID_HIDE_ZOOM: Final = 0.55
-# Chunk grid disembunyikan di zoom lebih rendah
+"""Zoom level below which the tile grid is hidden (zoomed out too far)."""
+
 CHUNK_GRID_HIDE_ZOOM: Final = 0.35
+"""Zoom level below which the chunk grid is hidden."""
 
-# Kecepatan pan kamera (pixel / detik) saat memakai keyboard
 PAN_SPEED: Final = 600.0
+"""Camera pan speed (pixels per second) when driven by the keyboard."""
 
-# FONT
+# Font
 # ---------------------------------------------
-DATA_PATH = Path(__file__).parent.parent / "data"
-FONT_PATH = DATA_PATH / "fonts" / "Roboto-Regular.ttf"
-FONT_SIZE = 18
 
-# FOLDER SCAN
+DATA_PATH: Final = Path(__file__).parent.parent / "data"
+FONT_PATH: Final = DATA_PATH / "fonts" / "Roboto-Regular.ttf"
+FONT_SIZE: Final = 18
+
+# Folder scanning
 # ---------------------------------------------
-ALWAYS_EXCLUDED: tuple[str, ...] = (PROJECT_DIR_NAME, ".git")
-"""Pola yang selalu aktif dan tidak dapat dimatikan pengguna."""
 
-DEFAULT_EXCLUDES: tuple[str, ...] = (
+ALWAYS_EXCLUDED: Final[tuple[str, ...]] = (PROJECT_DIR_NAME, ".git")
+"""Patterns that are always active and cannot be disabled by the user."""
+
+DEFAULT_EXCLUDES: Final[tuple[str, ...]] = (
     ".git",
     ".hg",
     ".svn",
@@ -70,23 +78,26 @@ DEFAULT_EXCLUDES: tuple[str, ...] = (
     ".vscode",
 )
 
-IMAGE_EXTENSIONS: Final = (".png", ".jpg", ".jpeg")
-"""Ekstensi gambar yang dipindai asset index."""
-FONT_EXTENSIONS: Final = (".tff", ".otf")
-"""Ekstensi font yang dipindai sebagai font"""
-AUDIO_EXTENSIONS: Final = (".wav", ",.ogg", ".mp3", ".flac")
-"""Eksrensi audio yang dipindai sebagai audio"""
+IMAGE_EXTENSIONS: Final[tuple[str, ...]] = (".png", ".jpg", ".jpeg")
+"""Image file extensions indexed by the asset scan."""
 
-# MAP CONFIG
+FONT_EXTENSIONS: Final[tuple[str, ...]] = (".ttf", ".otf")
+"""Font file extensions indexed by the asset scan."""
+
+AUDIO_EXTENSIONS: Final[tuple[str, ...]] = (".wav", ".ogg", ".mp3", ".flac")
+"""Audio file extensions indexed by the asset scan."""
+
+# Map config
 # ---------------------------------------------
-MAP_SUFFIX = ".json"
-"""Ekstensi file kandidat map (dan sidecar aset)."""
 
-MAP_PROBE_BYTES = 4096
-"""Jumlah byte awal file JSON yang dibaca untuk menebak apakah ia map."""
+MAP_SUFFIX: Final = ".json"
+"""File extension of map candidates (and asset sidecars)."""
 
-JOIN_TIMEOUT = 5.0
-"""Batas tunggu saat menutup aplikasi di tengah pemindaian (detik)."""
+MAP_PROBE_BYTES: Final = 4096
+"""Number of leading bytes read from a JSON file to guess its kind."""
+
+JOIN_TIMEOUT: Final = 5.0
+"""Seconds to wait for the scan thread when shutting down mid-scan."""
 
 # Default map settings
 DEFAULT_TILE_SIZE: Final = 16
@@ -95,14 +106,5 @@ DEFAULT_ENCODING: Final = "base64_zlib"
 DEFAULT_MAP_TYPE: Final = "orthogonal"
 MAP_VERSION: Final = "2.0"
 
-# Kosong: chunk tile kosong panjang chunk_size * chunk_size
-# Layer default yang selalu tersedia
 LAYER_BASE: Final = "1"
-
-
-__all__ = (
-    "CAMERA_VIRTUAL_HEIGHT",
-    "CAMERA_VIRTUAL_WIDTH",
-    "WINDOW_HEIGHT",
-    "WINDOW_WIDTH",
-)
+"""The base layer that is always present on every map."""

@@ -1,3 +1,12 @@
+"""Safe and atomic JSON persistence helpers.
+
+Every config file in the editor goes through these functions so that a
+crash can never leave a half-written file and a corrupt file can never
+crash the editor on startup.
+"""
+
+from __future__ import annotations
+
 import contextlib
 import json
 import logging
@@ -10,14 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 def write_json_atomic(path: Path, data: dict[str, Any]) -> bool:
-    """Tulis dict ke JSON secara atomik (temp file + ``os.replace``).
+    """Write a dict as JSON atomically (temp file + ``os.replace``).
 
     Args:
-        path: Path file tujuan.
-        data: Dict yang diserialisasi.
+        path: Destination file path.
+        data: Dict to serialize.
 
     Returns:
-        True bila berhasil.
+        True when the write succeeded.
     """
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -39,9 +48,15 @@ def write_json_atomic(path: Path, data: dict[str, Any]) -> bool:
 
 
 def read_json_safe(path: Path) -> dict[str, Any] | None:
-    """Baca file JSON; ``None`` bila hilang, rusak, atau bukan objek.
+    """Read a JSON file; ``None`` when missing, corrupt, or not an object.
 
-    File rusak dicadangkan ke ``<nama>.bak`` sebelum diabaikan.
+    A corrupt file is backed up as ``<name>.bak`` before being ignored.
+
+    Args:
+        path: File to read.
+
+    Returns:
+        The parsed object, or ``None``.
     """
     if not path.is_file():
         return None
@@ -60,6 +75,7 @@ def read_json_safe(path: Path) -> dict[str, Any] | None:
 
 
 def _backup_corrupt(path: Path) -> None:
+    """Copy a corrupt file aside so the user can inspect it later."""
     try:
         backup = path.with_suffix(path.suffix + ".bak")
         backup.write_bytes(path.read_bytes())
@@ -69,5 +85,13 @@ def _backup_corrupt(path: Path) -> None:
 
 
 def known_keys_stripped(raw: dict[str, Any], known: frozenset[str]) -> dict[str, Any]:
-    """Ambil key tak dikenal agar dapat ditulis ulang tanpa hilang."""
+    """Return the keys not covered by ``known`` so they survive a rewrite.
+
+    Args:
+        raw: Raw config dict.
+        known: Keys the config dataclass already handles.
+
+    Returns:
+        Dict of unknown keys only.
+    """
     return {k: v for k, v in raw.items() if k not in known}

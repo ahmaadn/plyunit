@@ -1,17 +1,18 @@
-"""Tata letak jendela: sidebar kiri, viewport tengah, sidebar kanan.
+"""Fixed IDE-style window layout: left sidebar, center, right sidebar.
 
-Sebelumnya setiap panel adalah jendela ImGui mengambang yang saling menumpuk
-dan menutupi kanvas. Modul ini memasang tata letak tetap seperti IDE:
+Every panel used to be a floating ImGui window that stacked and covered
+the canvas. This module installs a fixed layout instead:
 
-* **Sidebar kiri** — aset & palette (sumber tile).
-* **Tengah** — tab map + kanvas peta (dibiarkan transparan agar render raylib
-  di belakangnya terlihat).
-* **Sidebar kanan** — properti: layer, physics, objek, autotile, pengaturan.
+* **Left sidebar** — assets & palette (tile sources).
+* **Center** — map tab bar plus canvas (kept transparent so the raylib
+  render behind it stays visible).
+* **Right sidebar** — properties: layers, physics, objects, autotiles,
+  settings.
 
-Lebar kedua sidebar dapat digeser lewat *splitter* dan disimpan di
-``.ryeditor/editor.json``. Rect viewport tengah diekspos lewat
-:attr:`DockLayout.viewport` supaya kanvas tahu area yang boleh menerima
-input mouse — tanpa itu, klik di atas sidebar akan ikut melukis tile.
+Both sidebars can be resized with splitters. The center viewport rect
+is exposed through :attr:`DockLayout.viewport` so the canvas knows
+which area accepts mouse input — without it, clicks on a sidebar would
+also paint tiles.
 """
 
 from __future__ import annotations
@@ -33,10 +34,18 @@ TOOLBAR_HEIGHT = 40.0
 STATUS_BAR_HEIGHT = 26.0
 TAB_BAR_HEIGHT = 32.0
 
+MIN_SECTION_FRACTION = 0.15
+"""Minimum share of one section in a vertical sidebar split.
+
+Without this limit, dragging a divider all the way makes one browser
+vanish entirely and it cannot be recovered without editing
+``editor.json``.
+"""
+
 
 @dataclass(slots=True)
 class Rect:
-    """Persegi di koordinat layar."""
+    """A rectangle in screen coordinates."""
 
     x: float
     y: float
@@ -44,23 +53,24 @@ class Rect:
     height: float
 
     def contains(self, px: float, py: float) -> bool:
-        """True bila titik berada di dalam persegi."""
+        """Return whether the point lies inside the rectangle."""
         return (
             self.x <= px <= self.x + self.width and self.y <= py <= self.y + self.height
         )
 
 
 class DockLayout:
-    """Menghitung dan menggambar kerangka tata letak editor.
+    """Computes and draws the editor's layout skeleton.
 
     Attributes:
-        left_width: Lebar sidebar kiri dalam pixel.
-        right_width: Lebar sidebar kanan dalam pixel.
-        show_left: Tampilkan sidebar kiri.
-        show_right: Tampilkan sidebar kanan.
-        show_tabs: Sisakan :data:`TAB_BAR_HEIGHT` di atas area tengah
-            untuk tab bar (set ``False`` bila belum ada tab bar).
-        viewport: Area kanvas tengah setelah dikurangi sidebar & bar.
+        left_width: Left sidebar width in pixels.
+        right_width: Right sidebar width in pixels.
+        show_left: Whether the left sidebar is visible.
+        show_right: Whether the right sidebar is visible.
+        show_tabs: Reserve :data:`TAB_BAR_HEIGHT` above the center area
+            for a tab bar (set ``False`` when there is no tab bar).
+        viewport: Center canvas area after subtracting sidebars and
+            bars.
     """
 
     def __init__(
@@ -68,6 +78,7 @@ class DockLayout:
         left_width: float = DEFAULT_LEFT_WIDTH,
         right_width: float = DEFAULT_RIGHT_WIDTH,
     ) -> None:
+        """Initialize the layout with the given sidebar widths."""
         self.left_width = left_width
         self.right_width = right_width
         self.show_left = True
@@ -76,39 +87,39 @@ class DockLayout:
         self.viewport = Rect(0.0, 0.0, 0.0, 0.0)
 
     # ------------------------------------------------------------------
-    # Geometri
+    # Geometry
     # ------------------------------------------------------------------
 
     @staticmethod
     def max_sidebar_width(total_width: float) -> float:
-        """Lebar maksimum satu sidebar untuk lebar jendela tertentu.
+        """Return the maximum width of one sidebar for a given window width.
 
-        Diambil dari nilai terkecil antara batas absolut dan
-        :data:`MAX_SIDEBAR_FRACTION` dari lebar jendela, tetapi tidak pernah
-        turun di bawah :data:`MIN_SIDEBAR_WIDTH` supaya sidebar tetap dapat
-        ditampilkan pada jendela yang sangat sempit.
+        This is the smaller of the absolute cap and
+        :data:`MAX_SIDEBAR_FRACTION` of the window width, but never
+        below :data:`MIN_SIDEBAR_WIDTH` so a sidebar stays visible in
+        very narrow windows.
         """
         fraction = max(0.0, total_width) * MAX_SIDEBAR_FRACTION
         return max(MIN_SIDEBAR_WIDTH, min(MAX_SIDEBAR_WIDTH, fraction))
 
     def clamp_widths(self, total_width: float) -> None:
-        """Jaga agar sidebar tidak memakan seluruh layar.
+        """Keep the sidebars from consuming the whole screen.
 
-        Nilai hasil clamp ditulis balik ke :attr:`left_width` /
-        :attr:`right_width` sehingga lebar yang tersimpan di ``editor.json``
-        sudah valid dan tidak melompat saat jendela diubah ukurannya.
+        The clamped values are written back to :attr:`left_width` /
+        :attr:`right_width` so the widths saved to ``editor.json`` are
+        already valid and do not jump when the window is resized.
         """
         max_each = self.max_sidebar_width(total_width)
         self.left_width = min(max(self.left_width, MIN_SIDEBAR_WIDTH), max_each)
         self.right_width = min(max(self.right_width, MIN_SIDEBAR_WIDTH), max_each)
 
     def reset_widths(self) -> None:
-        """Kembalikan kedua sidebar ke lebar default."""
+        """Restore both sidebars to their default widths."""
         self.left_width = DEFAULT_LEFT_WIDTH
         self.right_width = DEFAULT_RIGHT_WIDTH
 
     def compute(self) -> tuple[Rect, Rect, Rect]:
-        """Hitung rect sidebar kiri, tengah, dan kanan untuk frame ini.
+        """Compute the left, center, and right rects for this frame.
 
         Returns:
             Tuple ``(left, center, right)``.
@@ -135,7 +146,7 @@ class DockLayout:
         )
         right = Rect(origin_x + total_w - right_w, body_y, right_w, body_h)
 
-        # Kanvas hanya boleh menerima mouse di bawah tab bar (bila ada).
+        # The canvas only accepts the mouse below the tab bar (when present).
         tabs = TAB_BAR_HEIGHT if self.show_tabs else 0.0
         self.viewport = Rect(
             center.x,
@@ -146,7 +157,7 @@ class DockLayout:
         return left, center, right
 
     def toolbar_rect(self) -> Rect:
-        """Rect strip toolbar di bawah menu bar."""
+        """Return the toolbar strip rect below the menu bar."""
         viewport = imgui.get_main_viewport()
         return Rect(
             viewport.work_pos.x,
@@ -156,7 +167,7 @@ class DockLayout:
         )
 
     def status_bar_rect(self) -> Rect:
-        """Rect strip status bar di dasar jendela."""
+        """Return the status-bar strip rect at the bottom of the window."""
         viewport = imgui.get_main_viewport()
         return Rect(
             viewport.work_pos.x,
@@ -166,23 +177,24 @@ class DockLayout:
         )
 
     # ------------------------------------------------------------------
-    # Helper jendela
+    # Window helpers
     # ------------------------------------------------------------------
 
     @staticmethod
     def begin_fixed(
         name: str, rect: Rect, *, transparent: bool = False, padding: bool = True
     ) -> bool:
-        """Buka jendela tanpa dekorasi yang terkunci pada sebuah rect.
+        """Open an undecorated window locked to a rect.
 
         Args:
-            name: ID jendela.
-            rect: Posisi & ukuran.
-            transparent: Jangan gambar latar (dipakai viewport kanvas).
-            padding: Pakai padding standar ImGui.
+            name: Window ID.
+            rect: Position and size.
+            transparent: Skip drawing the background (used by the
+                canvas viewport).
+            padding: Use standard ImGui padding.
 
         Returns:
-            True bila isi jendela perlu digambar.
+            True when the window's contents should be drawn.
         """
         imgui.set_next_window_pos(imgui.ImVec2(rect.x, rect.y))
         imgui.set_next_window_size(imgui.ImVec2(rect.width, rect.height))
@@ -207,21 +219,22 @@ class DockLayout:
         return bool(expanded)
 
     def draw_splitter(self, name: str, rect: Rect, *, is_left: bool) -> None:
-        """Gambar pegangan geser di tepi sidebar.
+        """Draw a draggable handle at the edge of a sidebar.
 
         Args:
-            name: ID unik splitter.
-            rect: Rect sidebar yang menempel pada splitter.
-            is_left: True bila splitter berada di kanan sidebar kiri.
+            name: Unique splitter ID.
+            rect: Sidebar rect adjacent to the splitter.
+            is_left: True when the splitter is at the right edge of the
+                left sidebar.
         """
         x = rect.x + rect.width if is_left else rect.x - SPLITTER_THICKNESS
         handle = Rect(x, rect.y, SPLITTER_THICKNESS, rect.height)
 
         imgui.set_next_window_pos(imgui.ImVec2(handle.x, handle.y))
-        # Tanpa ``window_min_size`` 0, ImGui memaksa jendela ini selebar
-        # ``style.window_min_size`` (32px) sehingga tampil sebagai kotak gelap
-        # di tepi sidebar. ``no_background`` + border 0 membuat jendela tidak
-        # terlihat; hanya rect sorotan di bawah yang tampak saat hover.
+        # Without ``window_min_size`` 0, ImGui forces this window to
+        # ``style.window_min_size`` (32px), showing as a dark box at the
+        # sidebar edge. ``no_background`` + border 0 hides the window;
+        # only the highlight rect below is visible on hover.
         flags: imgui.WindowFlags_ = (
             imgui.WindowFlags_.no_title_bar
             | imgui.WindowFlags_.no_resize
@@ -229,7 +242,6 @@ class DockLayout:
             | imgui.WindowFlags_.no_scrollbar
             | imgui.WindowFlags_.no_saved_settings
             | imgui.WindowFlags_.no_bring_to_front_on_focus
-            # | imgui.WindowFlags_.no_background
         )
         imgui.set_next_window_size(imgui.ImVec2(handle.width, handle.height))
         imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(0, 0))
@@ -251,8 +263,9 @@ class DockLayout:
                     self.left_width += delta
                 else:
                     self.right_width -= delta
-                # Clamp seketika, bukan menunggu compute() frame berikutnya,
-                # agar pegangan tidak terlihat melewati batas lalu memantul.
+                # Clamp right away instead of waiting for the next
+                # frame's compute(), so the grip is never seen crossing
+                # the limit and bouncing back.
                 self.clamp_widths(imgui.get_main_viewport().work_size.x)
 
         if imgui.is_item_hovered() and imgui.is_mouse_double_clicked(0):
@@ -273,36 +286,29 @@ class DockLayout:
         imgui.pop_style_var()  # imgui.StyleVar_.window_border_size
 
 
-MIN_SECTION_FRACTION = 0.15
-"""Porsi minimum satu bagian pada pembagian vertikal di dalam sidebar.
-
-Tanpa batas ini, menggeser pemisah sampai mentok membuat salah satu browser
-hilang sepenuhnya dan tidak dapat dikembalikan tanpa mengedit ``editor.json``.
-"""
-
-
 def clamp_split(ratio: float) -> float:
-    """Jaga rasio pembagian tetap di rentang yang dapat dipakai."""
+    """Keep a split ratio within the usable range."""
     return min(max(ratio, MIN_SECTION_FRACTION), 1.0 - MIN_SECTION_FRACTION)
 
 
 def draw_horizontal_splitter(
     name: str, ratio: float, *, height: float, thickness: float = SPLITTER_THICKNESS
 ) -> float:
-    """Gambar pemisah horizontal yang dapat digeser di dalam sebuah panel.
+    """Draw a draggable horizontal divider inside a panel.
 
-    Berbeda dari :meth:`DockLayout.draw_splitter` yang memakai jendela ImGui
-    tersendiri di koordinat layar, helper ini digambar inline di dalam layout
-    induknya — dipakai untuk membagi satu sidebar menjadi dua bagian bertumpuk.
+    Unlike :meth:`DockLayout.draw_splitter`, which uses its own ImGui
+    window in screen coordinates, this helper is drawn inline inside
+    its parent layout — used to split one sidebar into two stacked
+    sections.
 
     Args:
-        name: ID unik pemisah.
-        ratio: Rasio tinggi bagian atas saat ini (0..1).
-        height: Tinggi total area yang dibagi, dalam pixel.
-        thickness: Tebal pegangan.
+        name: Unique divider ID.
+        ratio: Current top-section height ratio (0..1).
+        height: Total height of the split area, in pixels.
+        thickness: Handle thickness.
 
     Returns:
-        Rasio baru setelah interaksi, sudah di-clamp.
+        The new ratio after interaction, already clamped.
     """
     imgui.invisible_button(f"##hsplit_{name}", imgui.ImVec2(-1, thickness))
     hovered = imgui.is_item_hovered()

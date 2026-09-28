@@ -1,25 +1,21 @@
-"""Panel: Folder Explorer bergaya VS Code.
+"""Explorer panel: a VS Code-style project file tree.
 
-Menampilkan struktur project apa adanya — folder dan file, seluruhnya — bukan
-hanya aset gambar seperti
-:class:`~editor.ui.panels.asset_browser.AssetBrowserPanel`. Panel ini
-menggantikan browser map lama, yang hanya menampilkan file map.
+Shows the project structure as it is — folders and files, all of them —
+not only image assets. Click behavior follows the file kind computed by
+:class:`~scripts.project.file_tree.FileTree`:
 
-Perilaku klik mengikuti jenis file yang dihitung
-:class:`~editor.core.file_tree.FileTree`:
+* Image — opens an asset document tab (image / spritesheet props).
+* Map — opens a map tab.
+* Sidecar ``.json`` — routes to its parent image, because a sidecar is
+  the on-disk representation of the same asset document.
+* Other files — cannot be opened; drawn as inactive text.
 
-* Gambar → membuka tab dokumen aset (properti image / spritesheet).
-* Map → membuka tab map.
-* Sidecar ``.json`` → diarahkan ke gambar induknya, karena sidecar adalah
-  representasi disk dari dokumen aset yang sama.
-* File lain → tidak dapat dibuka; ditampilkan sebagai teks nonaktif.
+The "Hanya file editor" (editor files only) toggle hides the last group
+together with the folders it empties. With the toggle off those files
+still appear, but are not clickable, so no misleading action is offered.
 
-Toggle "Hanya file editor" menyembunyikan jenis terakhir beserta folder yang
-menjadi kosong karenanya. Saat toggle dimatikan file tersebut tetap muncul,
-tetapi tidak dapat diklik agar tidak ada aksi yang menyesatkan.
-
-Panel ini tidak pernah menelusuri disk: pohonnya diisi dari hasil pemindaian
-latar belakang lewat :meth:`FileExplorerPanel.set_tree`.
+This panel never touches the disk: the tree is filled from a background
+scan via :meth:`ExplorerPanel.set_tree`.
 """
 
 from __future__ import annotations
@@ -29,47 +25,52 @@ from pathlib import Path
 
 from imgui_bundle import imgui
 
-from scripts.panel import Element
 from scripts.project.file_tree import DirEntry, FileEntry, FileKind, FileTree
+from scripts.ui.panel import Panel
 
 logger = logging.getLogger(__name__)
 
 
-class ExplorerPanel(Element):
-    """Pohon file project.
+class ExplorerPanel(Panel):
+    """The project file tree.
 
     Attributes:
-        tree: Pohon file aktif; ``None`` sebelum pemindaian pertama selesai.
-        relevant_only: Sembunyikan file yang tidak dikenal editor.
-        search: Filter nama file.
-        selected: Path relatif file yang sedang dipilih.
-        active_path: Path absolut dokumen yang sedang dibuka, untuk disorot.
-        scanning: True selama pemindaian latar belakang berjalan.
+        root: Project root path.
+        tree: The active file tree; ``None`` before the first scan
+            finishes.
+        relevant_only: Hide files the editor does not know. Defaults
+            to False so the whole project shows, VS Code-style; noise
+            is already controlled by the scan excludes.
+        search: File-name filter.
+        selected: Relative path of the selected file.
+        active_path: Absolute path of the open document, highlighted.
+        scanning: True while a background scan is running.
     """
 
     def __init__(self) -> None:
+        """Start with an empty tree and default toggles."""
         self.root = Path()
         self.tree: FileTree | None = None
-        self.relevant_only: bool = True
+        self.relevant_only: bool = False
         self.search: str = ""
         self.selected: str | None = None
         self.active_path: Path | None = None
         self.scanning: bool = False
 
     def set_tree(self, tree: FileTree) -> None:
-        """Pasang pohon hasil pemindaian dan hentikan indikator scanning."""
+        """Install a scan result tree and stop the scanning indicator."""
         self.tree = tree
         self.root = tree.root_path
         self.scanning = False
 
     def set_root(self, root: Path) -> None:
-        """Arahkan panel ke project lain dan kosongkan pohon lama."""
+        """Point the panel at another project and drop the old tree."""
         self.root = root
         self.tree = None
         self.selected = None
 
     def draw(self) -> None:
-        """Gambar seluruh panel."""
+        """Draw the whole panel."""
         self._draw_toolbar()
         imgui.separator()
 
@@ -92,6 +93,7 @@ class ExplorerPanel(Element):
         imgui.end_child()
 
     def _draw_toolbar(self) -> None:
+        """Draw the refresh button, toggles, and search field."""
         if imgui.button("Refresh##explorer"):
             ...
         imgui.same_line()
@@ -114,20 +116,21 @@ class ExplorerPanel(Element):
         tree = self.tree
         if tree is not None:
             shown = tree.root.total_files(relevant_only=self.relevant_only)
-            imgui.text_disabled(f"{shown} file - {self.root.name}")
+            imgui.text_disabled(f"{shown} files - {self.root.name}")
 
     # ------------------------------------------------------------------
-    # Pohon
+    # Tree
     # ------------------------------------------------------------------
 
     def _visible(self, entry: FileEntry) -> bool:
+        """Return whether a file passes the relevance filter."""
         return not self.relevant_only or entry.kind.is_relevant
 
     def _draw_search_results(self, tree: FileTree) -> None:
-        """Hasil pencarian ditampilkan rata (tanpa hierarki).
+        """Draw search results as a flat list (no hierarchy).
 
-        Saat mencari, struktur folder justru menghalangi: yang dicari adalah
-        satu file tertentu, bukan lokasinya.
+        While searching, the folder structure gets in the way: the user
+        is looking for one specific file, not its location.
         """
         matches = tree.search(self.search, relevant_only=self.relevant_only)
         if not matches:
@@ -137,6 +140,7 @@ class ExplorerPanel(Element):
             self._draw_file(entry, label=entry.relative)
 
     def _draw_dir_children(self, node: DirEntry) -> None:
+        """Draw the folders, then the files, directly inside a node."""
         for child in node.children.values():
             self._draw_dir(child)
         for entry in node.files:
@@ -144,7 +148,7 @@ class ExplorerPanel(Element):
                 self._draw_file(entry)
 
     def _draw_dir(self, node: DirEntry) -> None:
-        # Folder yang seluruh isinya tersembunyi tidak perlu ditampilkan.
+        """Draw one folder node, hiding fully filtered-out folders."""
         if self.relevant_only and not node.has_relevant():
             return
 
@@ -166,11 +170,13 @@ class ExplorerPanel(Element):
             imgui.tree_pop()
 
     def _draw_file(self, entry: FileEntry, *, label: str | None = None) -> None:
+        """Draw one file row as a read-only node or a selectable."""
         text = f"{entry.icon} {label or entry.name}"
 
         if not entry.is_openable:
-            # File read-only: ditampilkan agar struktur project utuh, tetapi
-            # tidak interaktif supaya tidak menjanjikan aksi yang tidak ada.
+            # Read-only file: shown so the project structure stays
+            # complete, but not interactive, to avoid promising an
+            # action that does not exist.
             imgui.tree_node_ex(
                 f"{text}##file_{entry.relative}",
                 int(
@@ -194,20 +200,21 @@ class ExplorerPanel(Element):
         self._draw_file_context_menu(entry)
 
     # ------------------------------------------------------------------
-    # Aksi
+    # Actions
     # ------------------------------------------------------------------
 
     def _activate(self, entry: FileEntry) -> None:
-        """Buka file sesuai jenisnya."""
+        """Open a file according to its kind."""
         if entry.kind is FileKind.MAP:
             # ctx.bus.publish(MAP_OPEN_REQUESTED, entry.path)
             return
-        # Gambar dan sidecar bermuara ke dokumen aset yang sama.
+        # Images and sidecars lead to the same asset document.
         if entry.asset_id is not None:
             # ctx.bus.publish(ASSET_OPEN_REQUESTED, entry.asset_id)
             ...
 
     def _draw_file_context_menu(self, entry: FileEntry) -> None:
+        """Draw the right-click menu for a file row."""
         if not imgui.begin_popup_context_item(f"##filectx_{entry.relative}"):
             return
         imgui.text_disabled(entry.relative)
@@ -230,20 +237,21 @@ class ExplorerPanel(Element):
         imgui.end_popup()
 
     def _draw_dir_context_menu(self, node: DirEntry) -> None:
+        """Draw the right-click menu for a folder node."""
         if not imgui.begin_popup_context_item(f"##dirctx_{node.relative}"):
             return
         imgui.text_disabled(node.relative or "(root)")
         imgui.separator()
-        target = self.root / node.relative if node.relative else self.root
+        # ctx.bus.publish(MAP_NEW_REQUESTED, self.root / node.relative)
         if imgui.menu_item("Map Baru di sini...", "", False)[0]:
-            # ctx.bus.publish(MAP_NEW_REQUESTED, target)
             ...
+        # ctx.bus.publish(FILE_REVEAL_REQUESTED, self.root / node.relative)
         if imgui.menu_item("Buka di File Explorer", "", False)[0]:
-            # ctx.bus.publish(FILE_REVEAL_REQUESTED, target)
             ...
         imgui.end_popup()
 
     def _draw_background_context_menu(self) -> None:
+        """Draw the right-click menu for the empty area of the panel."""
         flags = int(
             imgui.PopupFlags_.mouse_button_right | imgui.PopupFlags_.no_open_over_items
         )

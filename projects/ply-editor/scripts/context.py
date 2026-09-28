@@ -1,13 +1,13 @@
 """AppContext — the editor's single shared state hub.
 
-Every element (panels, shell, your future canvas/tools) receives the
-same ``AppContext`` on bind and talks to **it**, never to another
-element. This keeps dependencies one-directional: UI → Context → model.
+Every panel and service receives the same :class:`AppContext` and talks
+to **it**, never to another panel. This keeps dependencies
+one-directional: UI -> context -> project model.
 
-The base ships the generic parts — settings, undo history, viewport
-camera, layout, status message. Add your own fields here (document,
-selection, active tool, …) and intent methods for them; menu bar,
-toolbar and hotkeys should all call the same intent.
+The context ships the generic parts — status message and app/service
+access. Add your own fields here (document, selection, active tool, …)
+and intent methods for them; menu bar, toolbar, and hotkeys should all
+call the same intent.
 """
 
 from __future__ import annotations
@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 
 
 class StatusType(IntEnum):
+    """Severity of a status-bar message."""
+
     NONE = auto()
     INFO = auto()
     WARNING = auto()
@@ -31,13 +33,21 @@ class AppContext:
 
     Attributes:
         app: The running plyunit app (window, scenes, services).
-        settings: Persisted editor preferences.
         paused: When ``True`` the app freezes scene simulation.
-        status: Message shown in the status bar.
+        status_msg: Message shown in the status bar.
+        status_type: Severity of the status-bar message.
+        project_name: Display name of the open project ("" when none).
+        one: Service locator (see ``plyunit.App.one``).
+        one_or_none: Optional service locator.
+        bus: The engine event bus.
     """
 
     def __init__(self, app: plyunit.App) -> None:
-        """Create the context around a bootstrapped app."""
+        """Create the context around a bootstrapped app.
+
+        Raises:
+            RuntimeError: When the event bus service is not registered.
+        """
         self.app = app
         self.paused = False
         self.status_msg = ""
@@ -48,33 +58,17 @@ class AppContext:
         self.one_or_none = app.one_or_none
         bus = app.one_or_none("@EventBus")
         if bus is None:
-            raise RuntimeError("Require Event Bus")
+            raise RuntimeError("Event bus service is required")
         self.bus = bus
 
     def set_status(self, message: str, status: StatusType | None = None) -> None:
-        """Replace the status-bar message."""
+        """Replace the status-bar message.
+
+        Args:
+            message: New message text.
+            status: Optional severity; when omitted the previous
+                severity is kept.
+        """
         self.status_msg = message
         if isinstance(status, StatusType):
             self.status_type = status
-
-    # ------------------------------------------------------------------
-    # History intents
-    # ------------------------------------------------------------------
-
-    # def undo(self) -> None:
-    #     """Undo the last edit."""
-    #     if self.history.undo():
-    #         self.set_status(f"Undo: {self.history.redo_label}")
-
-    # def redo(self) -> None:
-    #     """Redo the last undone edit."""
-    #     if self.history.redo():
-    #         self.set_status(f"Redo: {self.history.undo_label}")
-
-    # ------------------------------------------------------------------
-    # Your intents go here, e.g.
-    #
-    # def new_document(self) -> None: ...
-    # def open_document(self, path: str) -> bool: ...
-    # def save_document(self) -> bool: ...
-    # ------------------------------------------------------------------

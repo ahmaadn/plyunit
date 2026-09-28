@@ -8,8 +8,8 @@ Usage::
 
     from scripts import dialogs
 
-    path = dialogs.open_file("Open map", filetypes=(("Map", "*.map"),))
-    target = dialogs.save_file("Save map", default_name="untitled.map")
+    path = dialogs.ask_open_file("Open map", filetypes=(("Map", "*.map"),))
+    target = dialogs.ask_save_file("Save map", default_name="untitled.map")
 """
 
 from __future__ import annotations
@@ -38,19 +38,7 @@ def ask_open_file(
     return _run_dialog("askopenfilename", title, filetypes=filetypes)
 
 
-def ask_project_folder(title: str = "Open Project"):
-    """Ask the user for the project folder
-
-    Args:
-        title (str, optional): Dialog window title. Defaults to "Open Project".
-
-    Returns:
-        str | None : The chosen path, or ``None`` when cancelled/unavailable.
-    """
-    return _run_dialog("askdirectory", title)
-
-
-def save_file(
+def ask_save_file(
     title: str = "Save File",
     default_name: str = "",
     filetypes: tuple[tuple[str, str], ...] = (("All files", "*.*"),),
@@ -73,8 +61,29 @@ def save_file(
     )
 
 
+def ask_project_folder(title: str = "Open Project") -> str | None:
+    """Ask the user for an existing project folder.
+
+    Args:
+        title: Dialog window title.
+
+    Returns:
+        The chosen path, or ``None`` when cancelled/unavailable.
+    """
+    return _run_dialog("askdirectory", title)
+
+
 def _run_dialog(action: str, title: str, **kwargs: Any) -> str | None:
-    """Create a hidden Tk root, run one dialog, and always tear it down."""
+    """Create a hidden Tk root, run one dialog, and always tear it down.
+
+    Args:
+        action: ``tkinter.filedialog`` function name.
+        title: Dialog window title.
+        **kwargs: Forwarded to the dialog function.
+
+    Returns:
+        The chosen path, or ``None`` when cancelled/unavailable.
+    """
     try:
         import tkinter as tk
         from tkinter import filedialog

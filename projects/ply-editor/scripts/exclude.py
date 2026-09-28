@@ -1,30 +1,33 @@
-"""Pola exclude folder: parsing glob, pencocokan, dan penggabungan berlapis.
+"""Folder-exclude patterns: glob parsing, matching, and layered merging.
 
-Pemindaian project dipandu daftar pola *exclude*. Tanpa itu, ``assets_root``
-yang defaultnya ``"."`` membuat editor menelusuri seluruh folder project —
-termasuk ``.venv/``, ``.dist/``, dan ``node_modules/`` — sebelum satu frame pun
-tampil.
+Project scanning is driven by a list of *exclude* patterns. Without
+them, an ``assets_root`` defaulting to ``"."`` makes the editor traverse
+the entire project folder — including ``.venv/``, ``.dist/``, and
+``node_modules/`` — before a single frame is shown.
 
-Semantik pola
--------------
+Pattern semantics
+-----------------
 
-Pola adalah glob yang selalu memakai separator posix. Ada dua bentuk:
+A pattern is a glob that always uses posix separators. There are two
+forms:
 
-* **Tanpa ``/``** (mis. ``node_modules``, ``*.egg-info``) — dicocokkan dengan
-  *nama* folder pada kedalaman berapa pun.
-* **Mengandung ``/``** (mis. ``build/out``) — dicocokkan dengan path relatif
-  terhadap root project, dihitung dari root.
+* **Without ``/``** (e.g. ``node_modules``, ``*.egg-info``) — matched
+  against the folder *name* at any depth.
+* **With ``/``** (e.g. ``build/out``) — matched against the path
+  relative to the project root.
 
-``*`` dan ``?`` tidak melewati ``/``; ``**`` melewatinya. Pencocokan tidak peka
-huruf besar-kecil agar konsisten di Windows.
+``*`` and ``?`` do not cross ``/``; ``**`` does. Matching is
+case-insensitive so behavior is consistent on Windows.
 
-Penggabungan berlapis
----------------------
+Layered merging
+---------------
 
-Daftar global berlaku untuk semua project. Bila project menyalakan *override*,
-daftar project **mengganti** daftar global sepenuhnya; bila tidak, keduanya
-digabung. Di atas hasilnya selalu ditambahkan :data:`ALWAYS_EXCLUDED` yang tidak
-dapat dimatikan, agar scaffold editor dan metadata git tidak pernah terpindai.
+The global list applies to all projects. When a project enables
+*override*, the project list **replaces** the global list entirely;
+otherwise both are merged. On top of the result,
+:data:`~scripts.constants.ALWAYS_EXCLUDED` is always appended — it
+cannot be disabled — so the editor scaffold and git metadata are never
+scanned.
 """
 
 from __future__ import annotations
@@ -39,20 +42,19 @@ from scripts import constants as const
 
 logger = logging.getLogger(__name__)
 
-"""Daftar exclude global bawaan."""
-
 
 def normalize_pattern(raw: Any) -> str:
-    """Rapikan satu pola exclude.
+    """Clean up a single exclude pattern.
 
-    Membuang spasi, mengubah ``\\`` menjadi ``/``, serta melepas ``./`` di awal
-    dan ``/`` di akhir sehingga ``build/`` dan ``build`` diperlakukan sama.
+    Strips whitespace, converts ``\\`` to ``/``, and removes a leading
+    ``./`` and trailing ``/`` so ``build/`` and ``build`` are treated
+    the same.
 
     Args:
-        raw: Pola mentah dari file config atau input pengguna.
+        raw: Raw pattern from a config file or user input.
 
     Returns:
-        Pola ternormalisasi; string kosong bila pola tidak dapat dipakai.
+        The normalized pattern; an empty string when unusable.
     """
     if not isinstance(raw, str):
         return ""
@@ -66,13 +68,13 @@ def normalize_pattern(raw: Any) -> str:
 
 
 def normalize_patterns(raw: Any) -> tuple[str, ...]:
-    """Rapikan daftar pola, buang duplikat, pertahankan urutan.
+    """Clean up a list of patterns, dropping duplicates, keeping order.
 
     Args:
-        raw: Iterable pola; nilai non-string dilewati.
+        raw: Iterable of patterns; non-string values are skipped.
 
     Returns:
-        Tuple pola unik yang sudah ternormalisasi.
+        Tuple of unique, normalized patterns.
     """
     if isinstance(raw, str) or not isinstance(raw, (list, tuple, set, frozenset)):
         return ()
@@ -87,11 +89,11 @@ def normalize_patterns(raw: Any) -> tuple[str, ...]:
 
 
 def _translate(pattern: str) -> str:
-    """Ubah pola glob menjadi sumber regex.
+    """Translate a glob pattern into a regex source.
 
-    Ditulis manual, bukan memakai :func:`fnmatch.translate`, karena ``fnmatch``
-    memperlakukan ``*`` sebagai "apa saja termasuk ``/``" sehingga ``*`` dan
-    ``**`` tidak dapat dibedakan.
+    Written by hand instead of :func:`fnmatch.translate` because
+    ``fnmatch`` treats ``*`` as "anything including ``/``", making
+    ``*`` and ``**`` indistinguishable.
     """
     out: list[str] = []
     i = 0
@@ -103,7 +105,7 @@ def _translate(pattern: str) -> str:
                 i += 2
                 if pattern.startswith("/", i):
                     i += 1
-                    # "**/" boleh cocok dengan nol folder.
+                    # "**/" may match zero folders.
                     out.append("(?:.*/)?")
                 else:
                     out.append(".*")
@@ -133,6 +135,7 @@ def _translate(pattern: str) -> str:
 
 
 def _compile(pattern: str) -> re.Pattern[str] | None:
+    """Compile one pattern to a regex, logging and skipping on error."""
     try:
         return re.compile(f"^{_translate(pattern)}$", re.IGNORECASE)
     except re.error:
@@ -142,13 +145,14 @@ def _compile(pattern: str) -> re.Pattern[str] | None:
 
 @dataclass(frozen=True, slots=True)
 class ExcludeRules:
-    """Kumpulan pola exclude yang sudah dikompilasi.
+    """A compiled set of exclude patterns.
 
-    Bersifat immutable dan hashable sehingga dapat dibandingkan untuk mendeteksi
-    perubahan setting (dan memicu re-scan) tanpa menyimpan salinan terpisah.
+    Immutable and hashable so instances can be compared to detect
+    settings changes (and trigger a re-scan) without storing a separate
+    copy.
 
     Attributes:
-        patterns: Pola sumber ternormalisasi, untuk ditampilkan di UI.
+        patterns: Normalized source patterns, for display in the UI.
     """
 
     patterns: tuple[str, ...] = ()
@@ -161,17 +165,17 @@ class ExcludeRules:
 
     @classmethod
     def build(cls, patterns: Any) -> ExcludeRules:
-        """Kompilasi daftar pola menjadi aturan siap pakai.
+        """Compile a list of patterns into ready-to-use rules.
 
-        Pola dipisah menjadi dua kelompok: pola berbasis *nama* (tanpa ``/``)
-        yang cocok di kedalaman mana pun, dan pola berbasis *path* yang dihitung
-        dari root project.
+        Patterns are split into two groups: *name*-based patterns
+        (without ``/``) that match at any depth, and *path*-based
+        patterns that are matched from the project root.
 
         Args:
-            patterns: Iterable pola mentah.
+            patterns: Iterable of raw patterns.
 
         Returns:
-            :class:`ExcludeRules` baru.
+            A new :class:`ExcludeRules`.
         """
         cleaned = normalize_patterns(patterns)
         names: list[re.Pattern[str]] = []
@@ -192,17 +196,18 @@ class ExcludeRules:
 
     @property
     def is_empty(self) -> bool:
+        """True when no pattern compiled successfully."""
         return not self._name_res and not self._path_res
 
     def is_excluded_dir(self, name: str, relative_path: str) -> bool:
-        """True bila sebuah folder harus dilewati.
+        """Return whether a folder should be skipped.
 
         Args:
-            name: Nama folder itu sendiri.
-            relative_path: Path folder relatif terhadap root project.
+            name: The folder's own name.
+            relative_path: Folder path relative to the project root.
 
         Returns:
-            True bila folder cocok dengan salah satu pola.
+            True when the folder matches one of the patterns.
         """
         if any(regex.match(name) for regex in self._name_res):
             return True
@@ -212,7 +217,15 @@ class ExcludeRules:
         return any(regex.match(candidate) for regex in self._path_res)
 
     def is_excluded_relative(self, relative_path: str) -> bool:
-        """True bila path relatif atau salah satu induknya ter-exclude."""
+        """Return whether a relative path or one of its parents is excluded.
+
+        Args:
+            relative_path: Path relative to the project root, posix
+                separators.
+
+        Returns:
+            True when the path is excluded.
+        """
         candidate = normalize_pattern(relative_path)
         if not candidate:
             return False
@@ -223,14 +236,14 @@ class ExcludeRules:
         return False
 
     def is_excluded_path(self, path: Path, root: Path) -> bool:
-        """True bila ``path`` berada di dalam sesuatu yang ter-exclude.
+        """Return whether ``path`` sits inside something excluded.
 
-        Path di luar ``root`` dianggap tidak ter-exclude: aturan ini hanya
-        berbicara tentang isi project.
+        Paths outside ``root`` are considered not excluded: these rules
+        only talk about the project's contents.
 
         Args:
-            path: Path absolut yang diperiksa.
-            root: Root project.
+            path: Absolute path to check.
+            root: Project root.
         """
         try:
             relative = Path(path).relative_to(root).as_posix()
@@ -245,17 +258,17 @@ def resolve_excludes(
     *,
     override: bool = True,
 ) -> ExcludeRules:
-    """Gabungkan daftar global dan project menjadi satu aturan.
+    """Merge the global and project lists into one rule set.
 
     Args:
-        global_patterns: Pola dari config global.
-        project_patterns: Pola dari ``project.json``.
-        override: Bila True (default), daftar project **mengganti** daftar
-            global saat project punya minimal satu pola. Bila False, keduanya
-            digabung.
+        global_patterns: Patterns from the global config.
+        project_patterns: Patterns from ``project.json``.
+        override: When True (default), a non-empty project list
+            **replaces** the global list. When False, both are merged.
 
     Returns:
-        :class:`ExcludeRules` gabungan, selalu memuat :data:`ALWAYS_EXCLUDED`.
+        Merged :class:`ExcludeRules`; always includes
+        :data:`~scripts.constants.ALWAYS_EXCLUDED`.
     """
     globals_ = normalize_patterns(global_patterns)
     project = normalize_patterns(project_patterns)
