@@ -37,8 +37,6 @@ class ImGuiLayer(plyunit.ServiceUnit):
 
     def __init__(self) -> None:
         super().__init__("ImGuiLayer")
-        self.layout = DockLayout()
-        self.explorer = ExplorerPanel()
 
     def on_attach(self, app: EditorApp) -> None:
         """Resolve the event bus for menu actions."""
@@ -50,9 +48,10 @@ class ImGuiLayer(plyunit.ServiceUnit):
         self._ui.add_draw(self.draw)
         self.ctx = app.context
 
-        self.start_screen = StartScreen(
-            app, app._open_project, app.on_action_open_project
-        )
+        # Panel initialize
+        self.layout = DockLayout()
+        self.explorer = ExplorerPanel()
+        self.start_screen = StartScreen()
 
     @property
     def ui(self) -> plyunit.ImGui:
@@ -106,7 +105,7 @@ class ImGuiLayer(plyunit.ServiceUnit):
 
         if imgui.begin_menu("File"):
             if imgui.menu_item("Project Baru / Buka Folder...", "", False)[0]:
-                self.bus.publish(events.APP_OPEN_PROJECT)
+                self.bus.publish(events.APP_OPEN_FOLDER_PROJECT)
             imgui.separator()
             if imgui.menu_item("Map Baru", "Ctrl+N", False)[0]:
                 self.bus.publish(events.APP_NEW_MAP)

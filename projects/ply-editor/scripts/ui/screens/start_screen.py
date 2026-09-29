@@ -10,16 +10,11 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
 
 from imgui_bundle import imgui
 
+from scripts import events
 from scripts.ui.panel import Panel
-
-if TYPE_CHECKING:
-    from app import EditorApp
 
 logger = logging.getLogger(__name__)
 
@@ -58,41 +53,15 @@ class StartScreen(Panel):
             is shown.
         on_project: Callback invoked by the open-folder button.
         error: Last error message, or an empty string.
+
+    Events:
+        APP_OPEN_PROJECT_BY_PATH
+        APP_OPEN_FOLDER_PROJECT
     """
 
-    def __init__(
-        self,
-        app: EditorApp,
-        on_open: Callable[[Path], Any],
-        on_project: Callable[[], Any],
-    ) -> None:
-        self.config = app.global_config
-        self.on_open = on_open
-        self.on_project = on_project
+    def __init__(self) -> None:
         self.error: str = ""
         self._pending_removal: str | None = None
-
-    # ------------------------------------------------------------------
-    # Actions
-    # ------------------------------------------------------------------
-
-    def _try_open(self, path: Path) -> None:
-        """Open ``path`` through ``on_open`` and record any failure.
-
-        Args:
-            path: Project folder chosen by the user.
-        """
-        self.error = ""
-        try:
-            if not self.on_open(path):
-                self.error = f"Gagal membuka project: {path}"
-        except Exception as exc:
-            self.error = f"{type(exc).__name__}: {exc}"
-            logger.exception("Gagal membuka project %s", path)
-
-    # ------------------------------------------------------------------
-    # Render
-    # ------------------------------------------------------------------
 
     def draw(self) -> None:
         """Draw the start screen filling the main viewport."""
@@ -116,7 +85,7 @@ class StartScreen(Panel):
 
         if imgui.button("Buka Folder...", imgui.ImVec2(180, 34)):
             # start = self.config.valid_last_project()
-            self.on_project()
+            self.bus.publish(events.APP_OPEN_FOLDER_PROJECT)
             # self.picker.show(start)
 
         if self.error:
@@ -135,19 +104,19 @@ class StartScreen(Panel):
         imgui.end()
 
         if self._pending_removal is not None:
-            self.config.remove_project(self._pending_removal)
+            self.context.global_config.remove_project(self._pending_removal)
             self._pending_removal = None
 
     def _draw_recents(self) -> None:
         """Draw the recent-project list, or a placeholder when empty."""
-        if not self.config.recent_projects:
+        if not self.context.global_config.recent_projects:
             imgui.text_disabled("(belum ada project yang pernah dibuka)")
             return
 
         imgui.begin_child(
             "##recents", imgui.ImVec2(0, 0), int(imgui.ChildFlags_.borders)
         )
-        for index, entry in enumerate(self.config.recent_projects):
+        for index, entry in enumerate(self.context.global_config.recent_projects):
             exists = entry.exists
             if not exists:
                 imgui.push_style_color(
@@ -177,7 +146,7 @@ class StartScreen(Panel):
                 self._pending_removal = entry.path
 
             if clicked and exists:
-                self._try_open(Path(entry.path))
+                self.bus.publish(events.APP_OPEN_PROJECT_BY_PATH, path=entry.path)
             elif clicked and not exists:
                 self.error = f"Folder tidak ditemukan: {entry.path}"
 

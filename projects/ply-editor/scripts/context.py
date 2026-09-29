@@ -16,7 +16,7 @@ from enum import IntEnum, auto
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import plyunit
+    from app import EditorApp
 
 
 class StatusType(IntEnum):
@@ -42,7 +42,7 @@ class AppContext:
         bus: The engine event bus.
     """
 
-    def __init__(self, app: plyunit.App) -> None:
+    def __init__(self, app: EditorApp) -> None:
         """Create the context around a bootstrapped app.
 
         Raises:
@@ -56,10 +56,7 @@ class AppContext:
 
         self.one = app.one
         self.one_or_none = app.one_or_none
-        bus = app.one_or_none("@EventBus")
-        if bus is None:
-            raise RuntimeError("Event bus service is required")
-        self.bus = bus
+        self.global_config = app.global_config
 
     def set_status(self, message: str, status: StatusType | None = None) -> None:
         """Replace the status-bar message.

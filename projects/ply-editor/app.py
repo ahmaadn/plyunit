@@ -68,8 +68,9 @@ class EditorApp(plyunit.App):
         self.file_tree = FileTree()
         self.scan_worker = ScanWorker()
 
-        # Event wiring.
-        self.bus.subscribe(events.APP_OPEN_PROJECT, self.on_action_open_project)
+        # Event wiring
+        self.bus.subscribe(events.APP_OPEN_FOLDER_PROJECT, self.on_open_folder_project)
+        self.bus.subscribe(events.APP_OPEN_PROJECT_BY_PATH, self.open_project_by_path)
         self.bus.subscribe(events.APP_SAVE, self.on_action_save)
 
         # Hotkeys.
@@ -124,13 +125,13 @@ class EditorApp(plyunit.App):
         """The engine ``ImGui`` service (draw callbacks, capture queries)."""
         return self._ui
 
-    def on_action_open_project(self) -> None:
+    def on_open_folder_project(self) -> None:
         """Ask for a folder, open it as the project, and start scanning."""
         path = ask_project_folder()
         if not path:
             return
 
-        self._open_project(Path(path))
+        self.open_project_by_path(Path(path))
         self.context.set_status(
             f"Project '{self.project.project_name}' dibuka; memindai aset..."
             + (" (scaffold .ply-editor dibuat)" if self.project.created else "")
@@ -155,10 +156,10 @@ class EditorApp(plyunit.App):
             self.global_config.prune_missing()
             return
 
-        self._open_project(path_last_project)
+        self.open_project_by_path(path_last_project)
         logger.info(f"Open last project : {self.global_config.last_project}")
 
-    def _open_project(self, path: Path):
+    def open_project_by_path(self, path: Path):
         """Open ``path`` as the project and start the background scan.
 
         Cancels any running scan, opens the folder with the global
