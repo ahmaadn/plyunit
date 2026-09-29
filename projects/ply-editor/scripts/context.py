@@ -53,6 +53,7 @@ class AppContext:
         self.status_msg = ""
         self.status_type = StatusType.NONE
         self.project_name = ""
+        self.scaning_project = False
 
         self.one = app.one
         self.one_or_none = app.one_or_none

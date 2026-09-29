@@ -84,9 +84,7 @@ class StartScreen(Panel):
         imgui.dummy(imgui.ImVec2(0, 16))
 
         if imgui.button("Buka Folder...", imgui.ImVec2(180, 34)):
-            # start = self.config.valid_last_project()
             self.bus.publish(events.APP_OPEN_FOLDER_PROJECT)
-            # self.picker.show(start)
 
         if self.error:
             imgui.dummy(imgui.ImVec2(0, 8))
@@ -96,7 +94,7 @@ class StartScreen(Panel):
 
         imgui.dummy(imgui.ImVec2(0, 20))
         imgui.separator()
-        imgui.text("Project Terakhir")
+        imgui.text("Last Project")
         imgui.dummy(imgui.ImVec2(0, 6))
 
         self._draw_recents()
@@ -110,7 +108,7 @@ class StartScreen(Panel):
     def _draw_recents(self) -> None:
         """Draw the recent-project list, or a placeholder when empty."""
         if not self.ctx.global_config.recent_projects:
-            imgui.text_disabled("(belum ada project yang pernah dibuka)")
+            imgui.text_disabled("(No Project Yet)")
             return
 
         imgui.begin_child(
@@ -139,7 +137,7 @@ class StartScreen(Panel):
                 imgui.text_disabled(f"- {age}")
             if not exists:
                 imgui.same_line()
-                imgui.text_disabled("[folder hilang]")
+                imgui.text_disabled("[Missing Folder]")
 
             imgui.same_line(imgui.get_window_width() - 40)
             if imgui.small_button(f"X##remove{index}"):
@@ -148,7 +146,7 @@ class StartScreen(Panel):
             if clicked and exists:
                 self.bus.publish(events.APP_OPEN_PROJECT_BY_PATH, path=entry.path)
             elif clicked and not exists:
-                self.error = f"Folder tidak ditemukan: {entry.path}"
+                self.error = f"Folder can't find: {entry.path}"
 
         imgui.end_child()
 

@@ -55,19 +55,16 @@ class ExplorerPanel(Panel):
         self.search: str = ""
         self.selected: str | None = None
         self.active_path: Path | None = None
-        self.scanning: bool = False
 
     def set_tree(self, tree: FileTree) -> None:
         """Install a scan result tree and stop the scanning indicator."""
         self.tree = tree
         self.root = tree.root_path
-        self.scanning = False
 
     def set_root(self, root: Path) -> None:
         """Point the panel at another project and drop the old tree."""
         self.root = root
         self.tree = None
-        self.selected = None
 
     def draw(self) -> None:
         """Draw the whole panel."""
@@ -78,12 +75,14 @@ class ExplorerPanel(Panel):
             "##explorer_tree", imgui.ImVec2(0, 0), int(imgui.ChildFlags_.borders)
         )
         tree = self.tree
+        if self.ctx.scaning_project:
+            imgui.text_disabled("Scanning Project...")
+
         if tree is None:
-            imgui.text_disabled(
-                "Memindai project..." if self.scanning else "(project belum dipindai)"
-            )
+            imgui.end_child()
+            return
         elif tree.is_empty:
-            imgui.text_disabled("(project kosong)")
+            imgui.text_disabled("(Empty Project)")
         elif self.search.strip():
             self._draw_search_results(tree)
         else:
@@ -97,18 +96,18 @@ class ExplorerPanel(Panel):
         if imgui.button("Refresh##explorer"):
             ...
         imgui.same_line()
-        changed, value = imgui.checkbox("Hanya file editor", self.relevant_only)
+        changed, value = imgui.checkbox("Only Editor File", self.relevant_only)
         if changed:
             self.relevant_only = value
         if imgui.is_item_hovered():
             imgui.set_tooltip(
-                "Tampilkan hanya gambar, map, dan konfigurasi aset.\n"
-                "Bila dimatikan, file lain ikut terlihat namun tidak dapat dibuka."
+                "Only show image, map and configurate files.\n"
+                "If turn on, You can see other file but cannot open."
             )
 
         imgui.set_next_item_width(-1)
         changed, text = imgui.input_text_with_hint(
-            "##explorer_search", "Cari file...", self.search
+            "##explorer_search", "Search File...", self.search
         )
         if changed:
             self.search = text
@@ -130,7 +129,7 @@ class ExplorerPanel(Panel):
         """
         matches = tree.search(self.search, relevant_only=self.relevant_only)
         if not matches:
-            imgui.text_disabled("(tidak ada file yang cocok)")
+            imgui.text_disabled("(File dont match)")
             return
         for entry in matches:
             self._draw_file(entry, label=entry.relative)
@@ -205,7 +204,9 @@ class ExplorerPanel(Panel):
         if not entry.is_openable:
             # Read-only: shown for a complete structure, but not interactive.
             self._draw_file_row(entry, text, selected=False, enabled=False)
-            imgui.set_item_tooltip(f"{entry.relative}\n(tidak dapat dibuka editor)")
+            imgui.set_item_tooltip(
+                f"{entry.relative}\n(Cannot be opened in this editor)"
+            )
             self._draw_file_context_menu(entry)
             return
 
@@ -236,18 +237,18 @@ class ExplorerPanel(Panel):
         imgui.text_disabled(entry.relative)
         imgui.separator()
 
-        if entry.is_openable and imgui.menu_item("Buka", "", False)[0]:
+        if entry.is_openable and imgui.menu_item("Open", "", False)[0]:
             self.selected = entry.relative
             self._activate(entry)
-        if imgui.menu_item("Buka di File Explorer", "", False)[0]:
+        if imgui.menu_item("Reveal in File Explorer", "", False)[0]:
             # ctx.bus.publish(FILE_REVEAL_REQUESTED, entry.path.parent)
             ...
-        if imgui.menu_item("Map Baru di sini...", "", False)[0]:
+        if imgui.menu_item("New Map in Here...", "", False)[0]:
             # ctx.bus.publish(MAP_NEW_REQUESTED, entry.path.parent)
             ...
         if entry.kind is FileKind.MAP:
             imgui.separator()
-            if imgui.menu_item("Hapus Map", "", False)[0]:
+            if imgui.menu_item("Delete Map", "", False)[0]:
                 # ctx.bus.publish(MAP_DELETE_REQUESTED, entry.path)
                 ...
         imgui.end_popup()
@@ -259,10 +260,10 @@ class ExplorerPanel(Panel):
         imgui.text_disabled(node.relative or "(root)")
         imgui.separator()
         # ctx.bus.publish(MAP_NEW_REQUESTED, self.root / node.relative)
-        if imgui.menu_item("Map Baru di sini...", "", False)[0]:
+        if imgui.menu_item("New Map in Here...", "", False)[0]:
             ...
         # ctx.bus.publish(FILE_REVEAL_REQUESTED, self.root / node.relative)
-        if imgui.menu_item("Buka di File Explorer", "", False)[0]:
+        if imgui.menu_item("Reveal in File Explorer", "", False)[0]:
             ...
         imgui.end_popup()
 
@@ -275,7 +276,7 @@ class ExplorerPanel(Panel):
             return
         imgui.text_disabled(self.root.name or "(root project)")
         imgui.separator()
-        if imgui.menu_item("Map Baru...", "", False)[0]:
+        if imgui.menu_item("New Map...", "", False)[0]:
             # ctx.bus.publish(MAP_NEW_REQUESTED, self.root)
             ...
         if imgui.menu_item("Refresh", "F5", False)[0]:

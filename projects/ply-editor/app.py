@@ -132,7 +132,7 @@ class EditorApp(plyunit.App):
             return
 
         self.open_project_by_path(Path(path))
-        self.context.set_status(
+        self.ctx.set_status(
             f"Project '{self.project.project_name}' dibuka; memindai aset..."
             + (" (scaffold .ply-editor dibuat)" if self.project.created else "")
         )
@@ -170,6 +170,7 @@ class EditorApp(plyunit.App):
             path: Folder to open as the project.
         """
         self.scan_worker.cancel()
+        self.ctx.scaning_project = True
         self.project.open(
             Path(path), global_excludes=self.global_config.exclude_folders
         )

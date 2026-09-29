@@ -303,3 +303,4 @@ class ScanWorker(plyunit.ServiceUnit):
             status=StatusType.INFO,
         )
         self.active_job = None
+        self.ctx.scaning_project = False
