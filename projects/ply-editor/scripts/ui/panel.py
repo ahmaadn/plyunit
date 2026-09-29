@@ -21,7 +21,7 @@ class Panel(ABC):
     """
 
     bus: plyunit.EventBus
-    context: AppContext
+    ctx: AppContext
 
     def __new__(cls, *args, **kwargs):
         """Create the panel and auto-attach the bus and app context.
@@ -63,7 +63,7 @@ class Panel(ABC):
                 "app context to reach shared editor state."
             )
         # pyrefly: ignore [bad-assignment]
-        instance.context = app.context
+        instance.ctx = app.ctx
 
         return instance
 

@@ -46,7 +46,7 @@ class ImGuiLayer(plyunit.ServiceUnit):
 
         self._ui = app.ui
         self._ui.add_draw(self.draw)
-        self.ctx = app.context
+        self.ctx = app.ctx
 
         # Panel initialize
         self.layout = DockLayout()

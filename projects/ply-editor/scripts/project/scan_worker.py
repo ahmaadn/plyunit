@@ -240,7 +240,7 @@ class ScanWorker(plyunit.ServiceUnit):
 
     def on_attach(self, app: EditorApp) -> None:
         """Capture the shared context and reset job bookkeeping."""
-        self.ctx = app.context
+        self.ctx = app.ctx
         self.active_job: ScanJob | None = None
         self._scan_reason: str | None = None
 

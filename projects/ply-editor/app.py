@@ -45,7 +45,7 @@ class EditorApp(plyunit.App):
         self.setup_logging("debug", "./logs/editor.log")
 
         self.bus = plyunit.EventBus()
-        self.context = AppContext(self)
+        self.ctx = AppContext(self)
         self.mouse = plyunit.Mouse()
         self.input = plyunit.Input(gamepad=False)
         # pyrefly: ignore [bad-override-mutable-attribute]
@@ -177,7 +177,7 @@ class EditorApp(plyunit.App):
         # save to global
         self.global_config.touch_project(self.project.root, self.project.name)
         self.scan_worker.start(self.project.root, self.project.excludes)
-        self.context.set_status("Open last project")
+        self.ctx.set_status("Open last project")
 
     def on_unload(self):
         """Persist the global config and the open project on shutdown."""
@@ -189,4 +189,4 @@ class EditorApp(plyunit.App):
         """Persist the global config and the open project."""
         self.global_config.save()
         self.project.save()
-        self.context.set_status("Berhasil disimpan")
+        self.ctx.set_status("Berhasil disimpan")

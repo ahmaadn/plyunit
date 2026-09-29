@@ -104,19 +104,19 @@ class StartScreen(Panel):
         imgui.end()
 
         if self._pending_removal is not None:
-            self.context.global_config.remove_project(self._pending_removal)
+            self.ctx.global_config.remove_project(self._pending_removal)
             self._pending_removal = None
 
     def _draw_recents(self) -> None:
         """Draw the recent-project list, or a placeholder when empty."""
-        if not self.context.global_config.recent_projects:
+        if not self.ctx.global_config.recent_projects:
             imgui.text_disabled("(belum ada project yang pernah dibuka)")
             return
 
         imgui.begin_child(
             "##recents", imgui.ImVec2(0, 0), int(imgui.ChildFlags_.borders)
         )
-        for index, entry in enumerate(self.context.global_config.recent_projects):
+        for index, entry in enumerate(self.ctx.global_config.recent_projects):
             exists = entry.exists
             if not exists:
                 imgui.push_style_color(

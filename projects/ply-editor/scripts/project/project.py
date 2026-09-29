@@ -55,7 +55,7 @@ class Project(plyunit.ServiceUnit):
 
     def on_attach(self, app: EditorApp) -> None:
         """Capture the shared app context."""
-        self.ctx: AppContext = app.context
+        self.ctx: AppContext = app.ctx
 
     @property
     def root(self) -> Path:
