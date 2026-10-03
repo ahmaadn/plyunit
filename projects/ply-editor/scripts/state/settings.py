@@ -1,30 +1,21 @@
-"""Editor-wide (cross-project) configuration.
+"""Editor-wide (cross-project) settings state.
 
-Stored in ``data/settings.json`` inside the editor project (local,
-never published). It holds the recently opened projects, the last
-active project, window geometry, and global scan excludes.
-
-This config **never** fails startup: a missing or corrupt file always
-falls back to defaults, with the old file backed up as ``.bak``.
+:class:`GlobalConfig` holds the recently opened projects, the last
+active project, window geometry, and global scan excludes. It is plain
+state: persistence (loading and saving the on-disk ``settings.json``) is
+handled by :meth:`~scripts.app.context.Context.load_global_config` and
+:meth:`~scripts.app.context.Context.save_global_config`.
 """
 
 from __future__ import annotations
 
-import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Final
+from typing import Any
 
 from scripts import constants as const
-from scripts.exclude import normalize_patterns
-from scripts.json_io import read_json_safe, write_json_atomic
-
-logger = logging.getLogger(__name__)
-
-SETTINGS_FILENAME: Final = "settings.json"
-GLOBAL_CONFIG_DIR: Final = Path(__file__).parent.parent / "data"
-GLOBAL_CONFIG_PATH: Final = GLOBAL_CONFIG_DIR / SETTINGS_FILENAME
+from scripts.core.exclude import normalize_patterns
 
 
 @dataclass(slots=True)
@@ -194,37 +185,5 @@ class GlobalConfig:
                 out.exclude_folders = list(normalize_patterns(raw_excludes))
         return out
 
-    @classmethod
-    def load(cls, path: Path | None = None) -> GlobalConfig:
-        """Load the global config from disk.
 
-        Never raises: a missing / corrupt / unreadable file yields a
-        default config (the corrupt file is backed up first).
-
-        Args:
-            path: Optional path override (default:
-                :data:`GLOBAL_CONFIG_PATH`).
-
-        Returns:
-            A ready-to-use :class:`GlobalConfig`.
-        """
-        p = path or GLOBAL_CONFIG_PATH
-        result = read_json_safe(p)
-        if result is None:
-            return cls()
-        return cls.from_dict(result)
-
-    def save(self, path: Path | None = None) -> bool:
-        """Write the global config atomically.
-
-        Args:
-            path: Optional path override.
-
-        Returns:
-            True when the write succeeded.
-        """
-        p = path or GLOBAL_CONFIG_PATH
-        return write_json_atomic(p, self.to_dict())
-
-
-__all__ = ["GLOBAL_CONFIG_DIR", "GLOBAL_CONFIG_PATH", "GlobalConfig", "RecentProject"]
+__all__ = ["GlobalConfig", "RecentProject"]

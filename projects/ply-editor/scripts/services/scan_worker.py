@@ -1,6 +1,6 @@
 """Background project scanning: the job and its main-thread worker.
 
-:class:`ScanJob` runs :func:`~scripts.project.scan.scan_project` in
+:class:`ScanJob` runs :func:`~scripts.services.scan.scan_project` in
 a daemon thread and exposes progress/result via a lock. The UI never
 blocks: it polls :class:`ScanWorker` once per frame from the main
 thread.
@@ -18,14 +18,15 @@ from typing import TYPE_CHECKING, cast
 
 import plyunit
 from scripts import constants as const
-from scripts.context import StatusType
-from scripts.exclude import ExcludeRules
-from scripts.project.scan import ScanResult, scan_project
+from scripts.core.exclude import ExcludeRules
+from scripts.core.scan import ScanResult
+from scripts.services.scan import scan_project
+from scripts.state.ui import StatusType
 
 if TYPE_CHECKING:
     from app import EditorApp
 
-    from scripts.assets import Assets
+    from scripts.services.assets import Assets
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +237,13 @@ class ScanJob:
 
 
 class ScanWorker(plyunit.ServiceUnit):
-    """Main-thread coordinator for the current background scan."""
+    """Main-thread coordinator for the current background scan.
+
+    Owns the ``ctx.workspace.scanning`` flag: it raises it in
+    :meth:`start` and lowers it on every terminal path — result
+    applied, failure, or cancellation — so the UI can never get stuck
+    in a "scanning" state.
+    """
 
     def on_attach(self, app: EditorApp) -> None:
         """Capture the shared context and reset job bookkeeping."""
@@ -256,33 +263,39 @@ class ScanWorker(plyunit.ServiceUnit):
         self.cancel()
         self.active_job = ScanJob(root, rules)
         self._scan_reason = reason
+        self.ctx.workspace.scanning = True
         self.active_job.start()
 
     def cancel(self) -> None:
-        """Stop the running scan, if any."""
+        """Stop the running scan, if any, and end the scanning state."""
         if self.active_job is not None:
             self.active_job.shutdown()
-            self.active_job = None
+            self._finish()
 
     def poll(self) -> None:
         """Apply finished scan results; call once per frame.
 
-        When the active job produced a result, this loads assets,
-        rebuilds the file tree, updates the explorer panel, and sets
-        the status message.
+        When the active job produced a result, this loads assets and
+        rebuilds the file tree — the single source of truth the
+        explorer reads every frame, so no UI object is touched here —
+        and sets the status message.
         """
         job = self.active_job
-        project = self.one_or_none("@Project")
-        if job is None or project is None:
+        if job is None:
             return
 
         result = job.take_result()
         if result is None:
             if job.state is ScanState.FAILED:
-                self.ctx.set_status(
+                self.ctx.ui.set_status(
                     "Pemindaian project gagal; lihat log.", status=StatusType.ERROR
                 )
-                self.active_job = None
+                self._finish()
+            return
+
+        context = self.one_or_none("@Context")
+        if context is None:
+            self._finish()
             return
 
         assets = cast("Assets", self.one("@Assets"))
@@ -292,15 +305,16 @@ class ScanWorker(plyunit.ServiceUnit):
         # there is no second disk traversal and the exclude rules are
         # already applied.
         tree = self.one("@FileTree")
-        tree.build(project.root, result)
-
-        imgui_layer = self.one("@ImGuiLayer")
-        imgui_layer.explorer.set_tree(tree)
+        tree.build(context.project_root, result)
 
         verb = "dipindai ulang" if self._scan_reason == "refresh" else "ditemukan"
-        self.ctx.set_status(
+        self.ctx.ui.set_status(
             f"aset {verb}." + (" (dibatalkan)" if result.cancelled else ""),
             status=StatusType.INFO,
         )
+        self._finish()
+
+    def _finish(self) -> None:
+        """Clear the finished job and end the scanning state."""
         self.active_job = None
-        self.ctx.scaning_project = False
+        self.ctx.workspace.scanning = False

@@ -1,11 +1,3 @@
-"""Editor asset index built from project scan results.
-
-Unlike :class:`plyunit.Assets`, which loads folders, this subclass
-loads from :class:`~scripts.project.scan.ScanResult` so there is no
-second disk traversal. The asset base path is set to the project root
-by :meth:`~scripts.project.project.Project.open_project`.
-"""
-
 from __future__ import annotations
 
 import logging
@@ -17,7 +9,7 @@ from plyunit.utils import read_json
 from scripts import constants as const
 
 if TYPE_CHECKING:
-    from scripts.project.scan import ScanEntry, ScanResult
+    from scripts.core.scan import ScanEntry, ScanResult
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +26,7 @@ class Assets(plyunit.Assets):
         appear in the file tree.
 
         Args:
-            scan: Result of :func:`~scripts.project.scan.scan_project`.
+            scan: Result of :func:`~scripts.services.scan.scan_project`.
         """
         images = scan.images
         image_config = list(scan.image_configs)
@@ -206,3 +198,6 @@ class Assets(plyunit.Assets):
             ):
                 return asset_id
         return None
+
+
+__all__ = ["Assets"]

@@ -1,17 +1,3 @@
-"""Native file dialogs (tkinter), isolated and headless-safe.
-
-The editor runs inside a GLFW window, so dialogs open a short-lived
-hidden Tk root on top of it. Any failure (no tkinter, no display) turns
-into ``None`` instead of crashing the editor.
-
-Usage::
-
-    from scripts import dialogs
-
-    path = dialogs.ask_open_file("Open map", filetypes=(("Map", "*.map"),))
-    target = dialogs.ask_save_file("Save map", default_name="untitled.map")
-"""
-
 from __future__ import annotations
 
 import contextlib
@@ -106,3 +92,10 @@ def _run_dialog(action: str, title: str, **kwargs: Any) -> str | None:
         if root is not None:
             with contextlib.suppress(Exception):
                 root.destroy()
+
+
+__all__ = [
+    "ask_open_file",
+    "ask_project_folder",
+    "ask_save_file",
+]

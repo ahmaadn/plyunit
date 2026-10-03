@@ -1,167 +1,34 @@
-"""The project file tree powering the VS Code-style Explorer panel.
+"""The project file tree service powering the VS Code-style Explorer panel.
 
-Nothing else in the editor describes the **entire** project contents
-the way an Explorer panel needs, so this module builds that tree from
-a :class:`~scripts.project.scan.ScanResult` already computed in the
-worker thread: ``images``, ``json_files``, ``other``, and
-``directories`` are merged into one tree. Consequently there is no
-second disk traversal, and the exclude rules were already applied
-during the scan.
+The pure tree model (folders, files, classification) lives in
+:mod:`scripts.core.file_tree`; this module is the service that builds
+and owns the tree from a :class:`~scripts.core.scan.ScanResult` already
+computed in the worker thread. Consequently there is no second disk
+traversal, and the exclude rules were already applied during the scan.
 
-Every file is classified into a :class:`FileKind`. The classification
-decides what happens when the file is clicked and which files the
-"editor files only" toggle hides:
-
-* :attr:`FileKind.IMAGE` — open an asset document tab.
-* :attr:`FileKind.MAP` — open a map tab.
-* :attr:`FileKind.SIDECAR` — asset config; routed to its parent image.
-* :attr:`FileKind.ANIMATION` — animation config.
-* :attr:`FileKind.FONT` / :attr:`FileKind.AUDIO` — shown, not openable.
-* :attr:`FileKind.OTHER` — not openable by the editor.
-
-Maps and sidecars cannot be told apart by extension (both are
-``.json``); the scan already separated them via
-:func:`~scripts.project.scan.classify_json`.
+Every file is classified into a :class:`~scripts.core.file_kind.FileKind`.
+The classification decides what happens when the file is clicked and
+which files the "editor files only" toggle hides. Maps and sidecars
+cannot be told apart by extension (both are ``.json``); the scan already
+separated them via
+:func:`~scripts.services.scan.classify_json`.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterator, Sequence
-from dataclasses import dataclass, field
-from enum import Enum
+from collections.abc import Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from imgui_bundle import icons_fontawesome_6 as icons_fa
-
 import plyunit
+from scripts.core.file_kind import FileKind
+from scripts.core.file_tree import DirEntry, FileEntry
 
 if TYPE_CHECKING:
-    from scripts.project.scan import ScanEntry, ScanResult
+    from scripts.core.scan import ScanEntry, ScanResult
 
 logger = logging.getLogger(__name__)
-
-
-class FileKind(Enum):
-    """The role of a file inside the editor.
-
-    Values double as icon/sort keys in the UI, so do not change them
-    without updating :data:`KIND_ICONS`.
-    """
-
-    IMAGE = "image"
-    MAP = "map"
-    ANIMATION = "animation"
-    SIDECAR = "sidecar"
-    OTHER = "other"
-    FONT = "font"
-    AUDIO = "audio"
-
-    @property
-    def is_openable(self) -> bool:
-        """True when clicking this file opens a document tab."""
-        return self not in (
-            FileKind.OTHER,
-            FileKind.ANIMATION,
-            FileKind.AUDIO,
-            FileKind.FONT,
-        )
-
-    @property
-    def is_relevant(self) -> bool:
-        """True when the file shows in "editor files only" mode."""
-        return self is not FileKind.OTHER
-
-
-KIND_ICONS: dict[FileKind, str] = {
-    FileKind.IMAGE: icons_fa.ICON_FA_FILE_IMAGE,
-    FileKind.MAP: icons_fa.ICON_FA_MAP,
-    FileKind.SIDECAR: icons_fa.ICON_FA_FILE_CODE,
-    FileKind.OTHER: icons_fa.ICON_FA_FILE_CIRCLE_QUESTION,
-    FileKind.ANIMATION: icons_fa.ICON_FA_FILM,
-    FileKind.AUDIO: icons_fa.ICON_FA_FILE_AUDIO,
-    FileKind.FONT: icons_fa.ICON_FA_FONT,
-}
-"""Font Awesome glyph shown per file kind."""
-
-
-@dataclass(slots=True)
-class FileEntry:
-    """One file in the explorer tree.
-
-    Attributes:
-        name: File name including extension.
-        path: Absolute path.
-        relative: Path relative to the project root, posix separators.
-        kind: The file's classification.
-        asset_id: Asset id when this file is an image, or its parent
-            image when this file is a sidecar. ``None`` otherwise.
-    """
-
-    name: str
-    path: Path
-    relative: str
-    kind: FileKind = FileKind.OTHER
-    asset_id: str | None = None
-
-    @property
-    def icon(self) -> str:
-        """The Font Awesome glyph for this file's kind."""
-        return KIND_ICONS[self.kind]
-
-    @property
-    def is_openable(self) -> bool:
-        """True when the file can be opened as a tab.
-
-        A sidecar is only openable when its parent image is actually
-        indexed; an orphan sidecar leads nowhere.
-        """
-        if self.kind is FileKind.SIDECAR:
-            return self.asset_id is not None
-        return self.kind.is_openable
-
-
-@dataclass(slots=True)
-class DirEntry:
-    """One folder in the explorer tree.
-
-    Attributes:
-        name: Folder name (``""`` for the root).
-        relative: Path relative to the project root, posix separators.
-        children: Sub-folders, sorted by name.
-        files: Files directly inside this folder, sorted by name.
-    """
-
-    name: str
-    relative: str
-    children: dict[str, DirEntry] = field(default_factory=dict)
-    files: list[FileEntry] = field(default_factory=list)
-    is_open: bool = field(default=False, init=False)
-
-    def iter_files(self) -> Iterator[FileEntry]:
-        """Yield every file in this node and its descendants."""
-        yield from self.files
-        for child in self.children.values():
-            yield from child.iter_files()
-
-    def total_files(self, *, relevant_only: bool = False) -> int:
-        """Count files in this node and its descendants.
-
-        Args:
-            relevant_only: Count only files the editor knows.
-        """
-        if not relevant_only:
-            return sum(1 for _ in self.iter_files())
-        return sum(1 for f in self.iter_files() if f.kind.is_relevant)
-
-    def has_relevant(self) -> bool:
-        """True when at least one relevant file exists below this node.
-
-        Used by the explorer to hide folders that become empty while
-        the "editor files only" toggle is active.
-        """
-        return any(f.kind.is_relevant for f in self.iter_files())
 
 
 class FileTree(plyunit.ServiceUnit):
@@ -180,9 +47,21 @@ class FileTree(plyunit.ServiceUnit):
 
     def on_attach(self, app) -> None:
         """Resolve the asset index service."""
-        from scripts.assets import Assets
+        from scripts.services.assets import Assets
 
         self.assets = cast(Assets, self.one("@Assets"))
+
+    def reset(self) -> None:
+        """Drop the current tree.
+
+        Called when a *different* project starts scanning: the old
+        project's tree is invalid then, and keeping it would show stale
+        files until the new scan finishes. A same-root refresh keeps
+        the tree visible instead.
+        """
+        self.root_path = Path()
+        self.root = DirEntry(name="", relative="")
+        self._by_relative.clear()
 
     def build(self, root_path: Path, result: ScanResult) -> int:
         """Rebuild the tree from a :class:`ScanResult`.
@@ -321,10 +200,4 @@ class FileTree(plyunit.ServiceUnit):
         return out
 
 
-__all__ = [
-    "KIND_ICONS",
-    "DirEntry",
-    "FileEntry",
-    "FileKind",
-    "FileTree",
-]
+__all__ = ["FileTree"]

@@ -1,1 +1,1 @@
-"""Editor dock panels."""
+"""Editor dock panels: Explorer, status bar, and toolbar."""

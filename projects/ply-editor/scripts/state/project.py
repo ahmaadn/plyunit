@@ -1,29 +1,15 @@
-"""Per-project configuration dataclasses.
-
-Three files describe one opened project:
-
-* ``project.json`` (:class:`ProjectConfig`) — project-level settings,
-  lives next to the game data.
-* ``editor.json`` (:class:`EditorConfig`) — editor UI state, lives in
-  the ``.ply-editor/`` scaffold folder.
-* map defaults (:class:`MapDefaults`) — embedded in ``project.json``.
-
-All dataclasses round-trip through ``to_dict``/``from_dict`` and
-tolerate missing or mistyped fields, and unknown keys are preserved
-through ``extra`` so future fields survive older editor versions.
-"""
-
 from __future__ import annotations
 
 import contextlib
+import logging
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Self
 
 from plyunit.tilemap.encoding import ENCODER_REGISTRY
 from scripts import constants as const
-from scripts.exclude import normalize_patterns
-from scripts.json_io import known_keys_stripped, read_json_safe, write_json_atomic
+from scripts.core.exclude import normalize_patterns
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -151,22 +137,9 @@ class ProjectConfig:
 
         if "exclude_override" in data:
             out.exclude_override = bool(data.get("exclude_override"))
-        out.extra = known_keys_stripped(data, _PROJECT_KNOWN)
+        out.extra = {k: v for k, v in data.items() if k not in _PROJECT_KNOWN}
 
         return out
-
-    @classmethod
-    def load_config(cls, path: Path) -> Self:
-        """Load ``project.json``; defaults when missing or corrupt."""
-        raw = read_json_safe(path)
-        fallback = path.parent.name or str(path)
-        if raw is None:
-            return cls(name=fallback)
-        return cls.from_dict(raw, fallback_name=fallback)
-
-    def save_config(self, path: Path) -> bool:
-        """Write ``project.json`` atomically."""
-        return write_json_atomic(path, self.to_dict())
 
 
 @dataclass(slots=True)
@@ -330,17 +303,14 @@ class EditorConfig:
                 with contextlib.suppress(TypeError, ValueError):
                     if key in raw_sidebar:
                         out.sidebar[key] = float(raw_sidebar[key])
-        out.extra = known_keys_stripped(data, _EDITOR_KNOWN)
+        out.extra = {k: v for k, v in data.items() if k not in _EDITOR_KNOWN}
         return out
 
-    @classmethod
-    def load_config(cls, path: Path) -> Self:
-        """Load ``editor.json``; defaults when missing or corrupt."""
-        raw = read_json_safe(path)
-        if raw is None:
-            return cls()
-        return cls.from_dict(raw)
 
-    def save_config(self, path: Path) -> bool:
-        """Write ``editor.json`` atomically."""
-        return write_json_atomic(path, self.to_dict())
+__all__ = [
+    "CameraState",
+    "EditorConfig",
+    "GridToggles",
+    "MapDefaults",
+    "ProjectConfig",
+]

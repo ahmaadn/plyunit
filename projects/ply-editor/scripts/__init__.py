@@ -1,17 +1,15 @@
 """ply_editor — the ply-editor application package.
 
-The package is layered by responsibility; see README.md for the big
-picture. Dependencies flow one way: UI -> context -> project model.
+Layered by responsibility, dependencies flow one way:
+UI -> app -> services -> state/core (see README.md):
 
-Root modules:
     constants.py      application-wide constants
-    events.py         event-bus topic names
-    context.py        AppContext — shared editor state hub
-    dialogs.py        native file dialogs (headless-safe)
-    exclude.py        folder-exclude patterns for project scanning
-    global_config.py  GlobalConfig — cross-project settings
-    json_io.py        safe/atomic JSON persistence helpers
-    assets.py         Assets — asset index built from scan results
-    project/          project state: configs, scanning, file tree
-    ui/               ImGui layer, dock layout, panels
+    core/             PURE domain: exclude rules, file kinds, tree
+                      model, scan result (no ImGui, no I/O)
+    state/            data-only dataclasses: workspace, ui, settings,
+                      per-project configs
+    services/         world access: dialogs, scanning, file tree,
+                      assets
+    app/              Context, event-bus intents, keymap
+    ui/               ALL ImGui code: shell, layout, panels, screens
 """

@@ -12,7 +12,7 @@ from imgui_bundle import hello_imgui, imgui
 
 import plyunit
 from scripts import constants as const
-from scripts.assets import Assets
+from scripts.services.assets import Assets
 
 
 def load_font() -> imgui.ImFont:

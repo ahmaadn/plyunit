@@ -5,23 +5,33 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 import plyunit
-from scripts.context import AppContext
+from scripts.app.context import Context
 
 
 class Panel(ABC):
     """Base class for docked or floating pieces of editor UI.
 
-    Instances automatically receive the shared event bus and the app
-    context at construction, so subclasses can communicate with
-    services without explicit wiring.
+    Panels are thin views: they read shared state from the context and
+    publish intents on the event bus. Both are handed in explicitly at
+    construction — no hidden lookups, so a panel can also be built in
+    tests with fakes.
+
+    Args:
+        ctx: The shared app state hub.
+        bus: The event bus used to publish user intents.
 
     Attributes:
+        ctx: The shared app state hub.
         bus: The editor event bus.
-        context: The shared app state hub.
     """
 
     bus: plyunit.EventBus
-    ctx: AppContext
+    ctx: Context
+
+    # Query
+    one = plyunit.units.one
+    one_or_none = plyunit.units.one_or_none
+    group = plyunit.units.group
 
     def __new__(cls, *args, **kwargs):
         """Create the panel and auto-attach the bus and app context.
@@ -55,15 +65,15 @@ class Panel(ABC):
         # pyrefly: ignore [bad-assignment]
         instance.bus = bus
 
-        app = plyunit.units.one_or_none("@App")
-        if app is None:
+        ctx = plyunit.units.one_or_none("@Context")
+        if ctx is None:
             raise RuntimeError(
-                f"Cannot create {cls.__name__}: no '@App' unit is "
+                f"Cannot create {cls.__name__}: no '@ctx' unit is "
                 "registered in the unit registry. Panels require the "
-                "app context to reach shared editor state."
+                "Context to reach shared editor state."
             )
         # pyrefly: ignore [bad-assignment]
-        instance.ctx = app.ctx
+        instance.ctx = ctx
 
         return instance
 

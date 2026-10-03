@@ -13,7 +13,7 @@ import time
 
 from imgui_bundle import imgui
 
-from scripts import events
+from scripts.app import events
 from scripts.ui.panel import Panel
 
 logger = logging.getLogger(__name__)
@@ -47,11 +47,6 @@ class StartScreen(Panel):
     """Project picker shown before a project is open.
 
     Attributes:
-        config: Global config holding the recent-project list.
-        on_open: Callback ``(path) -> bool`` invoked when the user picks
-            a project. A false return means opening failed and an error
-            is shown.
-        on_project: Callback invoked by the open-folder button.
         error: Last error message, or an empty string.
 
     Events:
@@ -60,6 +55,7 @@ class StartScreen(Panel):
     """
 
     def __init__(self) -> None:
+        """Accept the standard panel wiring; no extra state."""
         self.error: str = ""
         self._pending_removal: str | None = None
 
@@ -102,19 +98,19 @@ class StartScreen(Panel):
         imgui.end()
 
         if self._pending_removal is not None:
-            self.ctx.global_config.remove_project(self._pending_removal)
+            self.ctx.global_.remove_project(self._pending_removal)
             self._pending_removal = None
 
     def _draw_recents(self) -> None:
         """Draw the recent-project list, or a placeholder when empty."""
-        if not self.ctx.global_config.recent_projects:
+        if not self.ctx.global_.recent_projects:
             imgui.text_disabled("(No Project Yet)")
             return
 
         imgui.begin_child(
             "##recents", imgui.ImVec2(0, 0), int(imgui.ChildFlags_.borders)
         )
-        for index, entry in enumerate(self.ctx.global_config.recent_projects):
+        for index, entry in enumerate(self.ctx.global_.recent_projects):
             exists = entry.exists
             if not exists:
                 imgui.push_style_color(
