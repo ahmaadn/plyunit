@@ -5,6 +5,7 @@ from pathlib import Path
 
 from imgui_bundle import icons_fontawesome_6 as icons_fa, imgui
 
+from scripts.app import events
 from scripts.core.file_kind import FileKind
 from scripts.core.file_tree import DirEntry, FileEntry
 from scripts.services.file_tree import FileTree
@@ -53,6 +54,11 @@ class ExplorerPanel(Panel):
         self.active_path: Path | None = None
 
     def sync_project(self, file_tree: FileTree):
+        """Wire the file-tree service to this panel after a scan completes.
+
+        Args:
+            file_tree: The file tree produced by a project scan.
+        """
         self._file_tree = file_tree
         self._sync_persisted_state()
 
@@ -124,7 +130,15 @@ class ExplorerPanel(Panel):
             imgui.text_disabled(f"{shown} files - {tree.root_path.name}")
 
     def _visible(self, entry: FileEntry) -> bool:
-        """Return whether a file passes the relevance filter."""
+        """Return whether a file passes the relevance filter.
+
+        Args:
+            entry: A file entry from the file tree.
+
+        Returns:
+            True when the file should be shown given the current
+            ``relevant_only`` toggle.
+        """
         return not self.relevant_only or entry.kind.is_relevant
 
     def _draw_search_results(self, tree: FileTree) -> None:
@@ -132,6 +146,9 @@ class ExplorerPanel(Panel):
 
         While searching, the folder structure gets in the way: the user
         is looking for one specific file, not its location.
+
+        Args:
+            tree: The file tree to search within.
         """
         matches = tree.search(self.search, relevant_only=self.relevant_only)
         if not matches:
@@ -141,7 +158,11 @@ class ExplorerPanel(Panel):
             self._draw_file(entry, label=entry.relative)
 
     def _draw_dir_children(self, node: DirEntry) -> None:
-        """Draw the folders, then the files, directly inside a node."""
+        """Draw the folders, then the files, directly inside a node.
+
+        Args:
+            node: The directory node whose children are drawn.
+        """
         for child in node.children.values():
             self._draw_dir(child)
         for entry in node.files:
@@ -149,7 +170,11 @@ class ExplorerPanel(Panel):
                 self._draw_file(entry)
 
     def _draw_dir(self, node: DirEntry) -> None:
-        """Draw one folder node, hiding fully filtered-out folders."""
+        """Draw one folder node, hiding fully filtered-out folders.
+
+        Args:
+            node: The directory node to draw.
+        """
         if self.relevant_only and not node.has_relevant():
             return
 
@@ -176,9 +201,19 @@ class ExplorerPanel(Panel):
     ) -> bool:
         """Draw one file row with its label aligned to folder labels.
 
-        The row background/hit area comes from a selectable (or a dummy for
-        read-only files); the label is drawn manually at the same X where a
-        tree node would place its label, so files and folders line up.
+        The row background/hit area comes from a selectable (or a dummy
+        for read-only files); the label is drawn manually at the same X
+        where a tree node would place its label, so files and folders
+        line up.
+
+        Args:
+            entry: The file entry being drawn.
+            text: The label text to draw.
+            selected: Whether this row is currently selected.
+            enabled: Whether the row is clickable.
+
+        Returns:
+            True when the row was clicked.
         """
         style = imgui.get_style()
         # Same height as a tree node row
@@ -204,7 +239,12 @@ class ExplorerPanel(Panel):
         return clicked
 
     def _draw_file(self, entry: FileEntry, *, label: str | None = None) -> None:
-        """Draw one file row as a read-only row or a selectable."""
+        """Draw one file row as a read-only row or a selectable.
+
+        Args:
+            entry: The file entry to draw.
+            label: Override label text; defaults to ``entry.name``.
+        """
         text = f"{KIND_ICONS[entry.kind]} {label or entry.name}"
 
         if not entry.is_openable:
@@ -227,17 +267,24 @@ class ExplorerPanel(Panel):
         self._draw_file_context_menu(entry)
 
     def _activate(self, entry: FileEntry) -> None:
-        """Open a file according to its kind."""
+        """Open a file according to its kind.
+
+        Args:
+            entry: The file entry to open.
+        """
         if entry.kind is FileKind.MAP:
             # self.bus.publish(MAP_OPEN_REQUESTED, entry.path)
             return
         # Images and sidecars lead to the same asset document.
         if entry.asset_id is not None:
-            # self.bus.publish(ASSET_OPEN_REQUESTED, entry.asset_id)
-            ...
+            self.bus.publish(events.ASSET_OPEN_REQUESTED, entry.asset_id)
 
     def _draw_file_context_menu(self, entry: FileEntry) -> None:
-        """Draw the right-click menu for a file row."""
+        """Draw the right-click menu for a file row.
+
+        Args:
+            entry: The file entry the menu belongs to.
+        """
         if not imgui.begin_popup_context_item(f"##filectx_{entry.relative}"):
             return
         imgui.text_disabled(entry.relative)
@@ -260,7 +307,11 @@ class ExplorerPanel(Panel):
         imgui.end_popup()
 
     def _draw_dir_context_menu(self, node: DirEntry) -> None:
-        """Draw the right-click menu for a folder node."""
+        """Draw the right-click menu for a folder node.
+
+        Args:
+            node: The directory node the menu belongs to.
+        """
         if not imgui.begin_popup_context_item(f"##dirctx_{node.relative}"):
             return
         imgui.text_disabled(node.relative or "(root)")

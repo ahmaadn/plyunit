@@ -26,6 +26,11 @@ class MainMenuBar(Panel):
     """
 
     def __init__(self, layout: DockLayout) -> None:
+        """Store the dock layout used by the View menu.
+
+        Args:
+            layout: Sidebar visibility and widths.
+        """
         self._layout = layout
 
     def draw(self) -> None:
@@ -34,30 +39,33 @@ class MainMenuBar(Panel):
             return
 
         if imgui.begin_menu("File"):
-            if imgui.menu_item("Project Baru / Buka Folder...", "", False)[0]:
+            if imgui.menu_item("Open Folder...", "", False)[0]:
                 self.bus.publish(events.APP_OPEN_FOLDER_PROJECT)
             imgui.separator()
-            if imgui.menu_item("Map Baru", "Ctrl+N", False)[0]:
+            if imgui.menu_item("New Map", "Ctrl+N", False)[0]:
                 self.bus.publish(events.APP_NEW_MAP)
-            if imgui.menu_item("Buka Map...", "Ctrl+O", False)[0]:
-                self.bus.publish(events.APP_OPEN_MAP)
-            if imgui.menu_item("Simpan", "Ctrl+S", False)[0]:
+            if imgui.menu_item("Save", "Ctrl+S", False)[0]:
                 self.bus.publish(events.APP_SAVE)
-            if imgui.menu_item("Simpan Sebagai...", "", False)[0]:
-                self.bus.publish(events.APP_SAVE_AS)
+            imgui.separator()
+            if imgui.menu_item("Close Project", "", False)[0]:
+                self.bus.publish(events.APP_CLOSE_PROJECT)
             imgui.end_menu()
 
         if imgui.begin_menu("View"):
             clicked, value = imgui.menu_item(
-                "Sidebar Kiri", "Ctrl+B", self._layout.show_left
+                "Left Sidebar", "Ctrl+B", self._layout.show_left
             )
             if clicked:
                 self._layout.show_left = value
             clicked, value = imgui.menu_item(
-                "Sidebar Kanan", "Ctrl+J", self._layout.show_right
+                "Right Sudebar", "Ctrl+J", self._layout.show_right
             )
             if clicked:
                 self._layout.show_right = value
+            clicked, value = imgui.menu_item("Show Tabs", "", self._layout.show_tabs)
+            if clicked:
+                self._layout.show_tabs = value
+
             imgui.separator()
             if imgui.menu_item("Reset Lebar Sidebar", "", False)[0]:
                 self._layout.reset_widths()

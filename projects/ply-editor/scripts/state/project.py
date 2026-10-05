@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Self
 
+from plyunit.core.types import ColorType
 from plyunit.tilemap.encoding import ENCODER_REGISTRY
 from scripts import constants as const
 from scripts.core.exclude import normalize_patterns
@@ -26,7 +27,7 @@ class MapDefaults:
     tile_size: tuple[int, int] = (const.DEFAULT_TILE_SIZE, const.DEFAULT_TILE_SIZE)
     chunk_size: int = const.DEFAULT_CHUNK_SIZE
     encoding: str = const.DEFAULT_ENCODING
-    background_color: tuple[int, int, int, int] = (20, 20, 30, 255)
+    background_color: ColorType = (20, 20, 30, 255)
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to the on-disk representation."""
@@ -231,7 +232,7 @@ class EditorConfig:
         grid: Overlay toggles.
         active_layer: Last active layer name.
         explorer_relevant_only: Last state of the explorer's
-            "Hanya file editor" toggle.
+            "Editor files only" toggle.
         panels: Panel open/close state (panel name -> bool).
         sidebar: Left/right sidebar widths in pixels.
         extra: Unknown keys, preserved across rewrites.

@@ -83,7 +83,7 @@ class DockLayout:
         self.right_width = right_width
         self.show_left = True
         self.show_right = True
-        self.show_tabs = False
+        self.show_tabs = True
         self.viewport = Rect(0.0, 0.0, 0.0, 0.0)
 
     @staticmethod

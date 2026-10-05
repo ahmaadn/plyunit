@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 import plyunit
 from scripts.app.context import Context
@@ -78,7 +79,7 @@ class Panel(ABC):
         return instance
 
     @abstractmethod
-    def draw(self) -> None:
+    def draw(self) -> Any:
         """Draw the panel.
 
         Docked panels draw content only (the caller owns

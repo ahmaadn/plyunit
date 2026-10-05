@@ -1,9 +1,10 @@
 """The center canvas area: where map editing happens.
 
-:class:`EditorScreen` owns the doc tab bar and the canvas viewport — the
-transparent window that lets raylib's render show through. Everything
-here is a reserved seam; the map canvas, tile palette, and layer panel
-will be added later.
+:class:`EditorScreen` owns the doc tab bar and the canvas viewport — a
+bare raylib area with no ImGui window covering it, so the render shows
+through and mouse hit-testing does not capture input. Everything here is
+a reserved seam; the map canvas, tile palette, and layer panel will be
+added later.
 """
 
 from __future__ import annotations
@@ -12,12 +13,14 @@ from typing import cast
 
 from imgui_bundle import imgui
 
+from scripts.app import events
 from scripts.services.file_tree import FileTree
-from scripts.ui.layout import DockLayout, Rect
+from scripts.ui.layout import TAB_BAR_HEIGHT, DockLayout, Rect
 from scripts.ui.menus import MainMenuBar
 from scripts.ui.panel import Panel
 from scripts.ui.panels.explorer import ExplorerPanel
 from scripts.ui.panels.status_bar import StatusBar
+from scripts.ui.panels.tabs import TabBar
 from scripts.ui.panels.toolbar import Toolbar
 
 
@@ -25,32 +28,35 @@ class EditorScreen(Panel):
     """The center canvas area of the editor.
 
     The shell computes the layout and hands this screen its center
-    :class:`~scripts.ui.layout.Rect`; the canvas window itself is drawn
-    transparently so the raylib render behind it stays visible. The
-    shared app context and event bus are auto-attached by
-    :meth:`Panel.__new__`; the layout and sub-panels are built in
-    :meth:`__init__`.
+    :class:`~scripts.ui.layout.Rect`; the canvas area is left free of
+    ImGui windows so the raylib render behind it stays visible and does
+    not capture mouse input. The shared app context and event bus are
+    auto-attached by :meth:`Panel.__new__`; the layout and sub-panels
+    are built in :meth:`__init__`.
     """
 
     def __init__(self) -> None:
+        """Build the dock layout and the chrome panels it hosts."""
         self.layout = DockLayout()
         self.menus = MainMenuBar(self.layout)
         self.toolbar = Toolbar(self.layout)
         self.explorer = ExplorerPanel()
         self.status = StatusBar()
+        self.tab_bar = TabBar()
 
     def sync(self):
+        """Rebind sub-panels to current engine services.
+
+        Must be called after a project scan produces a file tree so the
+        explorer panel picks it up.
+        """
 
         file_tree = cast(FileTree, self.one("@FileTree"))
 
         self.explorer.sync_project(file_tree)
 
     def draw(self) -> None:
-        """Draw the center area: document tabs above the canvas.
-
-        Args:
-            rect: The full center rect computed by the shell's layout.
-        """
+        """Draw the whole screen: menus, sidebars, tab bar, and status bar."""
         self.menus.draw()
         left, center, right = self.layout.compute()
 
@@ -59,9 +65,8 @@ class EditorScreen(Panel):
             self.draw_left_sidebar(left)
 
         if self.layout.show_tabs:
-            self._draw_tab_bar()
+            self._draw_tab_bar(center)
 
-        self._draw_canvas(center)
         if self.layout.show_right:
             self.draw_right_sidebar(right)
 
@@ -73,32 +78,40 @@ class EditorScreen(Panel):
 
         self.status.draw()
 
-    def _draw_tab_bar(self) -> None:
-        """Draw the document tab bar above the canvas (reserved seam)."""
+    def _draw_tab_bar(self, rect) -> None:
+        """Draw the document tab bar above the canvas (reserved seam).
 
-    def _draw_canvas(self, rect: Rect) -> None:
-        """Draw the transparent canvas viewport over the raylib render."""
-        canvas = self.layout.viewport
-        if canvas.width <= 0.0 or canvas.height <= 0.0:
+        Args:
+            rect: The center rect computed by the shell's layout.
+        """
+
+        strip = Rect(rect.x, rect.y, rect.width, min(TAB_BAR_HEIGHT, rect.height))
+        if not self.layout.begin_fixed(
+            "##center", strip, transparent=True, padding=False
+        ):
+            imgui.end()
             return
 
-        flags = (
-            imgui.WindowFlags_.no_title_bar
-            | imgui.WindowFlags_.no_resize
-            | imgui.WindowFlags_.no_move
-            | imgui.WindowFlags_.no_collapse
-            | imgui.WindowFlags_.no_bring_to_front_on_focus
-            | imgui.WindowFlags_.no_nav_focus
-            | imgui.WindowFlags_.no_saved_settings
-            | imgui.WindowFlags_.no_background
-        )
-        imgui.set_next_window_pos(imgui.ImVec2(canvas.x, canvas.y))
-        imgui.set_next_window_size(imgui.ImVec2(canvas.width, canvas.height))
-        imgui.begin("##canvas", None, int(flags))
+        imgui.push_style_var(imgui.StyleVar_.window_padding, imgui.ImVec2(6, 4))
+        actions = []
+        if self.tab_bar is not None:
+            actions = self.tab_bar.draw()
+        imgui.pop_style_var()
+
         imgui.end()
 
+        # Apply actions after the window is closed so tab-list mutations do not
+        # happen mid-draw of the tab bar.
+        if actions:
+            self.bus.publish(events.TAB_ACTION_REQUEST, actions)
+            # self._handle_tab_actions(actions)
+
     def draw_left_sidebar(self, rect: Rect) -> None:
-        """Draw the left sidebar: Explorer, Aset, and Setting tabs."""
+        """Draw the left sidebar: Explorer, Assets, and Settings tabs.
+
+        Args:
+            rect: The left sidebar rect computed by the shell's layout.
+        """
         if not self.layout.begin_fixed("##sidebar_left", rect):
             imgui.end()
             return
@@ -116,7 +129,11 @@ class EditorScreen(Panel):
         imgui.end()
 
     def draw_right_sidebar(self, rect: Rect) -> None:
-        """Draw the right sidebar (reserved seam)."""
+        """Draw the right sidebar (reserved seam).
+
+        Args:
+            rect: The right sidebar rect computed by the shell's layout.
+        """
         if not self.layout.begin_fixed("##sidebar_right", rect):
             imgui.end()
             return

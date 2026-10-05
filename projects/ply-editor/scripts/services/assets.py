@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import plyunit
+from plyunit.assets.types import TextureData
 from plyunit.utils import read_json
 from scripts import constants as const
 
@@ -16,6 +17,34 @@ logger = logging.getLogger(__name__)
 
 class Assets(plyunit.Assets):
     """Asset index fed by project scans."""
+
+    def get_region_ids(self, asset_id: str) -> set[str] | None:
+        """Return the region texture IDs for an asset, or ``None``.
+
+        Args:
+            asset_id: The asset identifier.
+
+        Returns:
+            set of region IDs, or ``None`` when the asset has no
+            regions.
+        """
+        return self._regions.get(asset_id)
+
+    def get_regions(self, asset_id: str) -> list[TextureData]:
+        """Return the region texture datas for an asset.
+
+        Args:
+            asset_id: The asset identifier.
+
+        Returns:
+            List of region texture data entries; empty list when none
+            are found.
+        """
+        ids = self.get_region_ids(asset_id)
+        if not ids or ids is None:
+            return []
+
+        return [self._textures[id] for id in ids if id in self._textures]
 
     def load_from_scan(self, scan: ScanResult) -> None:
         """Load every asset from a project scan result.

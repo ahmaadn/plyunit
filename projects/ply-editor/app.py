@@ -12,8 +12,11 @@ from scripts.app import events
 from scripts.app.context import Context
 from scripts.app.keymap import poll_shortcuts
 from scripts.core.exclude import resolve_excludes
+from scripts.services.assets import Assets
+from scripts.services.camera import CameraCanvas2D
 from scripts.services.dialogs import ask_project_folder
 from scripts.services.file_tree import FileTree
+from scripts.services.main_content import MainContent
 from scripts.services.scan_worker import ScanWorker
 from scripts.state.ui import StatusType
 from scripts.ui.shell import EditorShell
@@ -40,6 +43,8 @@ class EditorApp(plyunit.App):
     """
 
     default_font: imgui.ImFont
+    # pyrefly: ignore [bad-override-mutable-attribute]
+    assets: Assets
 
     def on_load(self) -> None:
         """Build state, services, and UI wiring; restore last project."""
@@ -56,7 +61,7 @@ class EditorApp(plyunit.App):
         self.mouse = plyunit.Mouse()
         self.input = plyunit.Input(gamepad=False)
         # pyrefly: ignore [bad-override-mutable-attribute]
-        self.camera: plyunit.Camera2D = plyunit.Camera2D(
+        self.camera: CameraCanvas2D = CameraCanvas2D(
             (
                 const.CAMERA_VIRTUAL_WIDTH,
                 const.CAMERA_VIRTUAL_HEIGHT,
@@ -84,9 +89,12 @@ class EditorApp(plyunit.App):
         self.bus.subscribe(events.APP_SAVE, self.on_save)
         self.bus.subscribe(events.APP_SAVE_AS, self.on_save_as)
         self.bus.subscribe(events.APP_REFRESH_ASSETS, self.on_refresh_assets)
+        self.bus.subscribe(events.APP_CLOSE_PROJECT, self.on_close_project)
 
         # 5. UI layer: attaches the draw callback and builds panels.
         self.shell = EditorShell()
+
+        self.main_content = MainContent()
 
         # Hotkeys.
         self.input.map(
@@ -107,17 +115,29 @@ class EditorApp(plyunit.App):
         self.camera.update(self.window.unscaled_dt)
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((255, 255, 255, 255))
+        self.window.clear_background(const.COLOR_BG)
 
         # Main-thread editor work: apply finished background scans
         # before the UI draws, so this frame already sees fresh state.
         self.scanner.poll()
 
-        poll_shortcuts(self.bus, ui=self.ui, input_service=self.input)
+        if self.ctx.project_active:
+            self.shell.update(dt)
 
-        self.shell.update(dt)
+            outside_viewport = not self.shell.editor_screen.layout.viewport.contains(
+                float(pr.get_mouse_x()), float(pr.get_mouse_y())
+            )
+            wants_mouse = self.ui.want_capture_mouse() or outside_viewport
+            wants_keyboard = self.ui.want_capture_keyboard()
+
+            poll_shortcuts(self.bus, ui=self.ui, input_service=self.input)
+            self.main_content.update(
+                dt, imgui_wants_mouse=wants_mouse, imgui_wants_keyboard=wants_keyboard
+            )
+
         self.scene_manager.render(self.renderer)
-        self.renderer.flush_all()
+        self.main_content.render_submit(self.renderer)
+        self.renderer.flush_all(camera=self.camera)
         self.ui.frame(dt)
         self.window.end_drawing()
         self.mouse.update(dt)
@@ -269,3 +289,13 @@ class EditorApp(plyunit.App):
 
         self.ctx.global_.touch_project(self.ctx.project_root, self.ctx.project.name)
         self.scanner.start(self.ctx.project_root, self.ctx.excludes)
+
+    def on_close_project(self) -> None:
+        """Save the open project, then drop it from the session."""
+        self.on_save()
+        self.ctx.project_active = False
+        self.ctx.global_.last_project = None
+
+        self.scanner.cancel()
+        self.assets.clear_all()
+        self.file_tree.reset()
