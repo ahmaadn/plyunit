@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import plyunit
-from plyunit.assets.types import TextureData
 from plyunit.utils import read_json
 from scripts import constants as const
 
 if TYPE_CHECKING:
+    from plyunit.assets.types import TextureData
     from scripts.core.scan import ScanEntry, ScanResult
 
 logger = logging.getLogger(__name__)

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from imgui_bundle import imgui
 
-from scripts.ui.layout import DockLayout
+if TYPE_CHECKING:
+    from scripts.ui.layout import DockLayout
 
 
 class Toolbar:

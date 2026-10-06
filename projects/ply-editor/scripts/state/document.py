@@ -37,17 +37,6 @@ class DocumentKind(Enum):
     MAP = "map"
     IMAGE = "image"
 
-    @property
-    def label(self) -> str:
-        """Short name for display in the UI."""
-        return _KIND_LABELS[self]
-
-
-_KIND_LABELS: dict[DocumentKind, str] = {
-    DocumentKind.MAP: "Map",
-    DocumentKind.IMAGE: "Image",
-}
-
 
 @dataclass(slots=True)
 class CameraState:

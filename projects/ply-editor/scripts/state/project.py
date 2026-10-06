@@ -3,12 +3,14 @@ from __future__ import annotations
 import contextlib
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
-from plyunit.core.types import ColorType
 from plyunit.tilemap.encoding import ENCODER_REGISTRY
 from scripts import constants as const
 from scripts.core.exclude import normalize_patterns
+
+if TYPE_CHECKING:
+    from plyunit.core.types import ColorType
 
 logger = logging.getLogger(__name__)
 

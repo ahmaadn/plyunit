@@ -21,9 +21,9 @@ import logging
 import os
 from collections.abc import Callable, Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scripts import constants as const
-from scripts.core.exclude import ExcludeRules
 from scripts.core.scan import (
     JSON_KIND_ANIMATION,
     JSON_KIND_IMAGE_CONFIG,
@@ -33,6 +33,9 @@ from scripts.core.scan import (
     ScanEntry,
     ScanResult,
 )
+
+if TYPE_CHECKING:
+    from scripts.core.exclude import ExcludeRules
 
 logger = logging.getLogger(__name__)
 

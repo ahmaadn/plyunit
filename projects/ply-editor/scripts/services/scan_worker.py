@@ -18,14 +18,14 @@ from typing import TYPE_CHECKING, cast
 
 import plyunit
 from scripts import constants as const
-from scripts.core.exclude import ExcludeRules
-from scripts.core.scan import ScanResult
 from scripts.services.scan import scan_project
 from scripts.state.ui import StatusType
 
 if TYPE_CHECKING:
     from app import EditorApp
 
+    from scripts.core.exclude import ExcludeRules
+    from scripts.core.scan import ScanResult
     from scripts.services.assets import Assets
 
 logger = logging.getLogger(__name__)

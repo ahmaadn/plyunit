@@ -4,11 +4,17 @@ Extends the engine's ``Camera2D`` with bounded zoom, fit-to-rect, and
 pan-by helpers tailored for the editor viewport.
 """
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 
 import plyunit
-from plyunit.core.types import PosType, RectType, SizeType
 from scripts import constants as const
+
+if TYPE_CHECKING:
+    from plyunit.core.types import PosType, RectType, SizeType
+
 
 logger = logging.getLogger(__name__)
 

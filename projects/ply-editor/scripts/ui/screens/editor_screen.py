@@ -9,12 +9,9 @@ added later.
 
 from __future__ import annotations
 
-from typing import cast
-
 from imgui_bundle import imgui
 
 from scripts.app import events
-from scripts.services.file_tree import FileTree
 from scripts.ui.layout import TAB_BAR_HEIGHT, DockLayout, Rect
 from scripts.ui.menus import MainMenuBar
 from scripts.ui.panel import Panel
@@ -50,10 +47,7 @@ class EditorScreen(Panel):
         Must be called after a project scan produces a file tree so the
         explorer panel picks it up.
         """
-
-        file_tree = cast(FileTree, self.one("@FileTree"))
-
-        self.explorer.sync_project(file_tree)
+        self.explorer.sync_project(self.one("@FileTree"))
 
     def draw(self) -> None:
         """Draw the whole screen: menus, sidebars, tab bar, and status bar."""

@@ -7,7 +7,6 @@ import pyray as pr
 
 import plyunit
 from plyunit.assets.types import TextureData
-from plyunit.core.types import ColorType, SizeType
 from scripts import constants as const
 from scripts.app import events
 from scripts.state.document import DocumentKind
@@ -16,6 +15,8 @@ from scripts.state.ui import StatusType
 
 if TYPE_CHECKING:
     from app import EditorApp
+
+    from plyunit.core.types import ColorType, SizeType
 
 logger = logging.getLogger(__name__)
 
