@@ -10,6 +10,7 @@ from scripts.app import events
 from scripts.core.file_kind import FileKind
 from scripts.ui import icons
 from scripts.ui.panel import Panel
+from scripts.ui.text_utils import set_tooltip
 
 if TYPE_CHECKING:
     from scripts.core.file_tree import DirEntry, FileEntry
@@ -104,11 +105,11 @@ class ExplorerPanel(Panel):
         if changed:
             self.relevant_only = value
             self.ctx.editor.explorer_relevant_only = value
-        if imgui.is_item_hovered():
-            imgui.set_tooltip(
-                "Only show image, map and configurate files.\n"
-                "If turn on, You can see other file but cannot open."
-            )
+
+        set_tooltip(
+            "Only show image, map and configurate files.\n"
+            "If turn on, You can see other file but cannot open."
+        )
 
         imgui.set_next_item_width(-1)
         changed, text = imgui.input_text_with_hint(

@@ -11,6 +11,7 @@ from __future__ import annotations
 from imgui_bundle import imgui
 
 from scripts.app import events
+from scripts.ui import icons
 from scripts.ui.layout import DockLayout
 from scripts.ui.panel import Panel
 
@@ -39,40 +40,52 @@ class MainMenuBar(Panel):
             return
 
         if imgui.begin_menu("File"):
-            if imgui.menu_item("Open Folder...", "", False)[0]:
+            if imgui.menu_item(
+                icons.with_icon(icons.FOLDER_OPEN, "Open Folder..."), "", False
+            )[0]:
                 self.bus.publish(events.APP_OPEN_FOLDER_PROJECT)
             imgui.separator()
-            if imgui.menu_item("New Map", "Ctrl+N", False)[0]:
+            if imgui.menu_item(icons.with_icon(None, "New Map"), "Ctrl+N", False)[0]:
                 self.bus.publish(events.APP_NEW_MAP)
-            if imgui.menu_item("Save", "Ctrl+S", False)[0]:
+            if imgui.menu_item(icons.with_icon(icons.SAVE, "Save"), "Ctrl+S", False)[0]:
                 self.bus.publish(events.APP_SAVE)
             imgui.separator()
-            if imgui.menu_item("Close Project", "", False)[0]:
+            if imgui.menu_item(
+                icons.with_icon(icons.CLOSE, "Close Project"), "", False
+            )[0]:
                 self.bus.publish(events.APP_CLOSE_PROJECT)
             imgui.end_menu()
 
         if imgui.begin_menu("View"):
             clicked, value = imgui.menu_item(
-                "Left Sidebar", "Ctrl+B", self._layout.show_left
+                icons.with_icon(None, "Left Sidebar"), "Ctrl+B", self._layout.show_left
             )
             if clicked:
                 self._layout.show_left = value
             clicked, value = imgui.menu_item(
-                "Right Sudebar", "Ctrl+J", self._layout.show_right
+                icons.with_icon(None, "Right Sudebar"),
+                "Ctrl+J",
+                self._layout.show_right,
             )
             if clicked:
                 self._layout.show_right = value
-            clicked, value = imgui.menu_item("Show Tabs", "", self._layout.show_tabs)
+            clicked, value = imgui.menu_item(
+                icons.with_icon(None, "Show Tabs"), "", self._layout.show_tabs
+            )
             if clicked:
                 self._layout.show_tabs = value
 
             imgui.separator()
-            if imgui.menu_item("Reset Lebar Sidebar", "", False)[0]:
+            if imgui.menu_item(
+                icons.with_icon(icons.REFRESH, "Reset Lebar Sidebar"), "", False
+            )[0]:
                 self._layout.reset_widths()
             imgui.end_menu()
 
         if imgui.begin_menu("Assets"):
-            if imgui.menu_item("Pindai Ulang Folder", "F5", False)[0]:
+            if imgui.menu_item(
+                icons.with_icon(icons.REFRESH, "Pindai Ulang Folder"), "F5", False
+            )[0]:
                 self.bus.publish(events.APP_REFRESH_ASSETS)
             imgui.end_menu()
 

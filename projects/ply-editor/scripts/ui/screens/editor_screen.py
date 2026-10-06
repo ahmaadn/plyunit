@@ -12,6 +12,7 @@ from __future__ import annotations
 from imgui_bundle import imgui
 
 from scripts.app import events
+from scripts.ui import icons
 from scripts.ui.layout import TAB_BAR_HEIGHT, DockLayout, Rect
 from scripts.ui.menus import MainMenuBar
 from scripts.ui.panel import Panel
@@ -19,6 +20,7 @@ from scripts.ui.panels.explorer import ExplorerPanel
 from scripts.ui.panels.status_bar import StatusBar
 from scripts.ui.panels.tabs import TabBar
 from scripts.ui.panels.toolbar import Toolbar
+from scripts.ui.text_utils import set_tooltip
 
 
 class EditorScreen(Panel):
@@ -111,12 +113,20 @@ class EditorScreen(Panel):
             return
 
         if imgui.begin_tab_bar("##left_tabs"):
-            if imgui.begin_tab_item("Explorer")[0]:
+            opened, _ = imgui.begin_tab_item(icons.FOLDER_EXPLORER)
+            set_tooltip("Explorer")
+            if opened:
                 self.explorer.draw()
                 imgui.end_tab_item()
-            if imgui.begin_tab_item("Aset")[0]:
+
+            opened, _ = imgui.begin_tab_item(icons.IMAGE)
+            set_tooltip("Assets")
+            if opened:
                 imgui.end_tab_item()
-            if imgui.begin_tab_item("Setting")[0]:
+
+            opened, _ = imgui.begin_tab_item(icons.SETTINGS)
+            set_tooltip("Settings")
+            if opened:
                 imgui.end_tab_item()
             imgui.end_tab_bar()
 

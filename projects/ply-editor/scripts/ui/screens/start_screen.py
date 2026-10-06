@@ -14,6 +14,7 @@ import time
 from imgui_bundle import imgui
 
 from scripts.app import events
+from scripts.ui import icons
 from scripts.ui.panel import Panel
 
 logger = logging.getLogger(__name__)
@@ -73,13 +74,13 @@ class StartScreen(Panel):
         imgui.begin("##start_screen", None, flags)
 
         imgui.dummy(imgui.ImVec2(0, 24))
-        imgui.text("RyUnit Map Editor")
-        imgui.text_disabled(
-            "Buka sebuah folder sebagai project untuk mulai mengedit peta."
-        )
+        imgui.text("Plyunit Editor")
+        imgui.text_disabled("Open a folder as a project to start editing map or assets")
         imgui.dummy(imgui.ImVec2(0, 16))
 
-        if imgui.button("Buka Folder...", imgui.ImVec2(180, 34)):
+        if imgui.button(
+            icons.with_icon(icons.FOLDER_OPEN, "Open Folder..."), imgui.ImVec2(180, 34)
+        ):
             self.bus.publish(events.APP_OPEN_FOLDER_PROJECT)
 
         if self.error:
@@ -118,7 +119,7 @@ class StartScreen(Panel):
                 )
 
             clicked, _ = imgui.selectable(
-                f"{entry.name}##recent{index}",
+                f"{icons.with_icon(icons.FOLDER, entry.name)}###recent{index}",
                 False,
                 imgui.SelectableFlags_.allow_double_click,
             )

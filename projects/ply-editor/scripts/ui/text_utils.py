@@ -24,3 +24,17 @@ def elide_text(text: str, max_width: float) -> str:
         else:
             high = mid - 1
     return text[:low].rstrip() + ELLIPSIS
+
+
+def text_width(text: str) -> float:
+    """Measure text with the current ImGui font (needs an active frame)."""
+    return float(imgui.calc_text_size(text).x)
+
+
+def set_tooltip(text: str):
+    """
+    Displays a tooltip for the most recently submitted UI item if it is currently
+    hovered.
+    """
+    if imgui.is_item_hovered():
+        imgui.set_tooltip(text)

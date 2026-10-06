@@ -9,7 +9,7 @@ from imgui_bundle import imgui
 
 from scripts.ui import icons
 from scripts.ui.panel import Panel
-from scripts.ui.text_utils import elide_text
+from scripts.ui.text_utils import elide_text, set_tooltip
 
 if TYPE_CHECKING:
     from scripts.state.document import Document
@@ -108,11 +108,9 @@ class TabBar(Panel):
         label = f"{shown_text}###tab{id(doc)}"
         opened, still_open = imgui.begin_tab_item(label, True, item_flags)
 
-        if imgui.is_item_hovered():
-            if shown_text == full_text:
-                imgui.set_tooltip(doc.tooltip)
-            else:
-                imgui.set_tooltip(f"{full_text}\n{doc.tooltip}")
+        set_tooltip(
+            doc.tooltip if shown_text == full_text else f"{full_text}\n{doc.tooltip}"
+        )
 
         self._draw_context_menu(index, actions)
 
