@@ -23,6 +23,7 @@ class FileEntry:
         name: File name including extension.
         path: Absolute path.
         relative: Path relative to the project root, posix separators.
+        suffix: extention file and include dot in first.
         kind: The file's classification.
         asset_id: Asset id when this file is an image, or its parent
             image when this file is a sidecar. ``None`` otherwise.
@@ -31,6 +32,7 @@ class FileEntry:
     name: str
     path: Path
     relative: str
+    suffix: str
     kind: FileKind = FileKind.OTHER
     asset_id: str | None = None
 

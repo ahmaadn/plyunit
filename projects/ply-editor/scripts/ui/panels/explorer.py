@@ -2,27 +2,20 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from imgui_bundle import icons_fontawesome_6 as icons_fa, imgui
+from imgui_bundle import imgui
 
 from scripts.app import events
 from scripts.core.file_kind import FileKind
-from scripts.core.file_tree import DirEntry, FileEntry
-from scripts.services.file_tree import FileTree
+from scripts.ui import icons
 from scripts.ui.panel import Panel
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from scripts.core.file_tree import DirEntry, FileEntry
+    from scripts.services.file_tree import FileTree
 
-KIND_ICONS: dict[FileKind, str] = {
-    FileKind.IMAGE: icons_fa.ICON_FA_FILE_IMAGE,
-    FileKind.MAP: icons_fa.ICON_FA_MAP,
-    FileKind.SIDECAR: icons_fa.ICON_FA_FILE_CODE,
-    FileKind.OTHER: icons_fa.ICON_FA_FILE_CIRCLE_QUESTION,
-    FileKind.ANIMATION: icons_fa.ICON_FA_FILM,
-    FileKind.AUDIO: icons_fa.ICON_FA_FILE_AUDIO,
-    FileKind.FONT: icons_fa.ICON_FA_FONT,
-}
-"""Font Awesome glyph shown per file kind."""
+logger = logging.getLogger(__name__)
 
 
 class ExplorerPanel(Panel):
@@ -186,8 +179,9 @@ class ExplorerPanel(Panel):
         if not node.children and not any(self._visible(f) for f in node.files):
             flags |= int(imgui.TreeNodeFlags_.leaf)
 
-        icon = icons_fa.ICON_FA_FOLDER_OPEN if node.is_open else icons_fa.ICON_FA_FOLDER
-        opened = imgui.tree_node_ex(f"{icon} {node.name}###dir_{node.relative}", flags)
+        node_name = icons.with_icon(icons.folder_icon(is_open=node.is_open), node.name)
+        opened = imgui.tree_node_ex(f"{node_name}###dir_{node.relative}", flags)
+
         if opened != node.is_open:
             node.is_open = opened
 
@@ -245,7 +239,13 @@ class ExplorerPanel(Panel):
             entry: The file entry to draw.
             label: Override label text; defaults to ``entry.name``.
         """
-        text = f"{KIND_ICONS[entry.kind]} {label or entry.name}"
+
+        icon = (
+            icons.icon_for_file_kind(entry.kind)
+            if entry.kind != FileKind.OTHER
+            else icons.icon_for_extension(entry.suffix.removeprefix("."))
+        )
+        text = icons.with_icon(icon, label or entry.name)
 
         if not entry.is_openable:
             # Read-only: shown for a complete structure, but not interactive.

@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from imgui_bundle import icons_fontawesome_6 as icons_fa, imgui
+from imgui_bundle import imgui
 
 from scripts.state.ui import StatusType
+from scripts.ui import icons
 from scripts.ui.layout import STATUS_BAR_HEIGHT
 from scripts.ui.panel import Panel
 
@@ -30,12 +31,12 @@ class StatusBar(Panel):
         status = self.ctx.ui
         if status.status_type == StatusType.ERROR:
             imgui.push_style_color(imgui.Col_.text, imgui.ImVec4(1.0, 0.4, 0.4, 1.0))
-            imgui.text(f"{icons_fa.ICON_FA_CIRCLE_XMARK} {status.status_msg}")
+            imgui.text(icons.with_icon(icons.ERROR, status.status_msg))
             imgui.pop_style_color()  # imgui.Col_.text
         elif status.status_type == StatusType.INFO:
-            imgui.text(f"{icons_fa.ICON_FA_INFO} {status.status_msg}")
+            imgui.text(icons.with_icon(icons.INFO, status.status_msg))
         elif status.status_type == StatusType.WARNING:
-            imgui.text(f"{icons_fa.ICON_FA_TRIANGLE_EXCLAMATION} {status.status_msg}")
+            imgui.text(icons.with_icon(icons.WARNING, status.status_msg))
         else:
             imgui.text(status.status_msg)
 

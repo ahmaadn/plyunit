@@ -3,13 +3,22 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum, auto
+from typing import TYPE_CHECKING
 
 from imgui_bundle import imgui
 
-from scripts.state.document import Document
+from scripts.ui import icons
 from scripts.ui.panel import Panel
+from scripts.ui.text_utils import elide_text
+
+if TYPE_CHECKING:
+    from scripts.state.document import Document
 
 logger = logging.getLogger(__name__)
+
+# Max width of a tab label, in "em" (multiples of the current font size),
+# so it scales with the font / DPI instead of being a fixed pixel value.
+TAB_LABEL_MAX_EM = 12.0
 
 
 class TabActionKind(Enum):
@@ -53,8 +62,12 @@ class TabBar(Panel):
         flags = int(
             imgui.TabBarFlags_.auto_select_new_tabs
             | imgui.TabBarFlags_.fitting_policy_scroll
+            # Dropdown button listing every tab: lets the user jump to a tab
+            # that is scrolled out of view.
+            | imgui.TabBarFlags_.tab_list_popup_button
             | imgui.TabBarFlags_.no_close_with_middle_mouse_button
         )
+
         if not imgui.begin_tab_bar("##map_tabs", flags):
             return actions
 
@@ -63,13 +76,14 @@ class TabBar(Panel):
             self._draw_tab(index, tab, suffixes.get(index, ""), actions)
 
         imgui.end_tab_bar()
+
         self.ctx.workspace._force_select_tab = None
         return actions
 
     def _draw_tab(
         self,
         index: int,
-        tab: Document,
+        doc: Document,
         suffix: str,
         actions: list[TabAction],
     ) -> None:
@@ -77,15 +91,28 @@ class TabBar(Panel):
         item_flags = int(imgui.TabItemFlags_.none)
         if self.ctx.workspace._force_select_tab == index:
             item_flags |= int(imgui.TabItemFlags_.set_selected)
-        if tab.dirty:
+        if doc.dirty:
             # ImGui's built-in dot marker clearly shows the unsaved status.
             item_flags |= int(imgui.TabItemFlags_.unsaved_document)
 
-        label = f"{tab.label(unique_suffix=suffix)}###tab{index}"
+        full_text = icons.with_icon(
+            icons.icon_for_document_kind(doc.kind), doc.label(unique_suffix=suffix)
+        )
+        max_width = imgui.get_font_size() * TAB_LABEL_MAX_EM
+        shown_text = elide_text(full_text, max_width)
+
+        # Stable ID per document (NOT per index). With an index-based ID,
+        # closing a tab on the left shifts every ID after it, so ImGui's
+        # remembered selection / scroll position lands on the wrong tab.
+        # If Document has its own uid, prefer that over id(tab).
+        label = f"{shown_text}###tab{id(doc)}"
         opened, still_open = imgui.begin_tab_item(label, True, item_flags)
 
         if imgui.is_item_hovered():
-            imgui.set_tooltip(tab.tooltip)
+            if shown_text == full_text:
+                imgui.set_tooltip(doc.tooltip)
+            else:
+                imgui.set_tooltip(f"{full_text}\n{doc.tooltip}")
 
         self._draw_context_menu(index, actions)
 
@@ -102,18 +129,11 @@ class TabBar(Panel):
         if not imgui.begin_popup_context_item(f"##tabctx{index}"):
             return
 
-        if imgui.menu_item("Simpan", "Ctrl+S", False)[0]:
+        if imgui.menu_item("Save", "Ctrl+S", False)[0]:
             actions.append(TabAction(TabActionKind.SAVE, index))
         imgui.separator()
-        if imgui.menu_item("Tutup", "Ctrl+W", False)[0]:
+        if imgui.menu_item("Close", "Ctrl+W", False)[0]:
             actions.append(TabAction(TabActionKind.CLOSE, index))
-        if imgui.menu_item("Tutup Lainnya", "", False)[0]:
-            actions.append(TabAction(TabActionKind.CLOSE_OTHERS, index))
-        if imgui.menu_item("Tutup Semua", "", False)[0]:
-            actions.append(TabAction(TabActionKind.CLOSE_ALL))
-        imgui.separator()
-        if imgui.menu_item("Map Baru", "Ctrl+N", False)[0]:
-            actions.append(TabAction(TabActionKind.NEW_MAP))
 
         imgui.end_popup()
 

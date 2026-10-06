@@ -135,6 +135,7 @@ class FileTree(plyunit.ServiceUnit):
             relative=entry.relative,
             kind=kind,
             asset_id=asset_id,
+            suffix=entry.suffix
         )
 
         node.files.append(file_entry)
