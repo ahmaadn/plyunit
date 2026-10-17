@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from scripts.services.assets import Assets
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(slots=True)
 class GridParams:
     """Grid parameters for assisting region selection on spritesheets.
 
@@ -36,6 +36,8 @@ class GridParams:
         margin_y: Top/bottom image margin skipped by the grid.
         snap: When True, region resizing snaps to grid multiples;
             when False, free per-pixel.
+        width: Active image width in pixels (0 until set).
+        height: Active image height in pixels (0 until set).
     """
 
     cell_width: int = 16
@@ -47,6 +49,8 @@ class GridParams:
     margin_x: int = 0
     margin_y: int = 0
     snap: bool = True
+    width: int = 0
+    height: int = 0
 
     @property
     def step_x(self) -> int:
@@ -58,36 +62,70 @@ class GridParams:
         """Vertical distance between consecutive cell origins."""
         return max(1, self.cell_height + self.spacing_y)
 
+    @property
+    def eff_offset_x(self):
+        """Effective horizontal offset, wrapped into ``[0, step_x)``."""
+        return (self.offset_x % self.step_x + self.step_x) % self.step_x
+
+    @property
+    def eff_offset_y(self):
+        """Effective vertical offset, wrapped into ``[0, step_y)``."""
+        return (self.offset_y % self.step_y + self.step_y) % self.step_y
+
     def cell_at(self, x: float, y: float) -> tuple[int, int] | None:
         """Grid cell containing the image point ``(x, y)``.
+
+        A cell is selectable only when the point lies on the cell area
+        (not in a spacing gap) and the whole cell fits inside the image
+        bounds excluding the margins.
 
         Args:
             x: X coordinate in image pixel space.
             y: Y coordinate in image pixel space.
 
         Returns:
-            ``(col, row)``, or ``None`` when the point falls in a margin
-            or the spacing gap between cells.
+            ``(col, row)``, or ``None`` when the point falls in a margin,
+            a spacing gap, or the cell is not fully visible.
         """
-        local_x = x - self.margin_x - self.offset_x
-        local_y = y - self.margin_y - self.offset_y
-        if local_x < 0 or local_y < 0:
+
+        rel_x = x - self.margin_x - self.eff_offset_x
+        rel_y = y - self.margin_y - self.eff_offset_y
+        if rel_x < 0 or rel_y < 0:
             return None
 
-        col = int(local_x // self.step_x)
-        row = int(local_y // self.step_y)
-        # Titik di dalam spacing bukan bagian dari petak mana pun.
-        if local_x - col * self.step_x >= self.cell_width:
-            return None
-        if local_y - row * self.step_y >= self.cell_height:
-            return None
-        return col, row
+        col = int(rel_x // self.step_x)
+        row = int(rel_y // self.step_y)
+
+        in_cell_x = (rel_x % self.step_x) < self.cell_width
+        in_cell_y = (rel_y % self.step_y) < self.cell_height
+        is_on_cell = in_cell_x and in_cell_y
+
+        cell_start_x = self.margin_x + self.eff_offset_x + (col * self.step_x)
+        cell_end_x = cell_start_x + self.cell_width
+
+        cell_start_y = self.margin_y + self.eff_offset_y + (row * self.step_y)
+        cell_end_y = cell_start_y + self.cell_height
+
+        is_full_x = (cell_start_x >= self.margin_x) and (
+            cell_end_x <= self.width - self.margin_x
+        )
+        is_full_y = (cell_start_y >= self.margin_y) and (
+            cell_end_y <= self.height - self.margin_y
+        )
+        is_fully_visible = is_full_x and is_full_y
+
+        is_valid_selection = is_on_cell and is_fully_visible
+
+        if is_valid_selection:
+            return col, row
+        return None
 
     def cell_rect(self, col: int, row: int) -> tuple[float, float, float, float]:
         """Pixel rect of a single grid cell."""
+
         return (
-            float(self.margin_x + self.offset_x + col * self.step_x),
-            float(self.margin_y + self.offset_y + row * self.step_y),
+            float(self.margin_x + self.eff_offset_x + col * self.step_x),
+            float(self.margin_y + self.eff_offset_y + row * self.step_y),
             float(self.cell_width),
             float(self.cell_height),
         )
@@ -171,6 +209,7 @@ class ImageDocument(Document):
     asset_id: str
     image_path: Path
     texture_property: TextureProperty
+    asset_name: str | None = None
     asset_type: Literal["image", "spritesheet"] = field(default="image")
     confg_path: Path | None = None
 
@@ -178,6 +217,8 @@ class ImageDocument(Document):
     _regions: list[TextureData] = field(default_factory=list)
     # pyrefly: ignore [bad-assignment]
     _texture_data: TextureData = field(default=None, init=False)
+
+    selected_region: int = field(default=-1, init=False)
 
     @classmethod
     def from_asset_id(cls, asset_id: str, assets: Assets) -> ImageDocument:
@@ -204,11 +245,17 @@ class ImageDocument(Document):
             confg_path=config.config_path,
             asset_type=config.type,
             texture_property=config.texture,
+            asset_name=config.name,
         )
 
         doc._regions = assets.get_regions(asset_id)
         doc._texture_data = assets.get_texture_data(asset_id)
 
+        size = doc.image_size()
+        if not size or size is None:
+            return doc
+
+        doc.grid.width, doc.grid.height = int(size[0]), int(size[1])
         return doc
 
     @property
@@ -371,3 +418,36 @@ class ImageDocument(Document):
         while f"{base}_{index}" in existing:
             index += 1
         return f"{base}_{index}"
+
+    def set_display_name(self, name: str) -> bool:
+        """Set the asset display name to a new, non-empty value.
+
+        Args:
+            name: The new display name; leading/trailing whitespace is
+                stripped.
+
+        Returns:
+            True when the name changed (and the document was marked
+            dirty), False when it is empty or unchanged.
+        """
+        cleaned = name.strip()
+        if not cleaned or cleaned == self.asset_name:
+            return False
+        self.asset_name = cleaned
+        self.mark_dirty()
+        return True
+
+    def image_size(self):
+        """Size of the active image asset in pixels.
+
+        Returns:
+            ``(width, height)`` as floats, or ``None`` when there is no
+            texture data or the size is not positive.
+        """
+        try:
+            (_x, _y, width, height) = self._texture_data.source_rect
+            if width <= 0 or height <= 0:
+                return None
+            return float(width), float(height)
+        except KeyError:
+            return None

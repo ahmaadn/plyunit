@@ -59,7 +59,7 @@ class EditorApp(plyunit.App):
         self.bus = plyunit.EventBus()
         # 2. Engine pieces.
         self.mouse = plyunit.Mouse()
-        self.input = plyunit.Input(gamepad=False)
+        self.input = plyunit.Input()
         # pyrefly: ignore [bad-override-mutable-attribute]
         self.camera: CameraCanvas2D = CameraCanvas2D(
             (
@@ -97,9 +97,12 @@ class EditorApp(plyunit.App):
         self.main_content = MainContent()
 
         # Hotkeys.
+        self.mouse.emit_to_bus = False
+        self.input.emit_to_bus = False
         self.input.map(
             "ctrl", pr.KeyboardKey.KEY_LEFT_CONTROL, pr.KeyboardKey.KEY_RIGHT_CONTROL
         )
+        self.input.map("space", pr.KeyboardKey.KEY_SPACE)
         self.input.map(events.APP_SAVE, pr.KeyboardKey.KEY_S)
 
         # 6. Session restore.

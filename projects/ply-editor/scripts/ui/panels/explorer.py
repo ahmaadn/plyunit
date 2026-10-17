@@ -277,7 +277,11 @@ class ExplorerPanel(Panel):
             # self.bus.publish(MAP_OPEN_REQUESTED, entry.path)
             return
         # Images and sidecars lead to the same asset document.
-        if entry.asset_id is not None:
+
+        if (
+            entry.kind in (FileKind.IMAGE, FileKind.SIDECAR)
+            and entry.asset_id is not None
+        ):
             self.bus.publish(events.ASSET_OPEN_REQUESTED, entry.asset_id)
 
     def _draw_file_context_menu(self, entry: FileEntry) -> None:

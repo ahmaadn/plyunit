@@ -16,6 +16,7 @@ from scripts.ui import icons
 from scripts.ui.layout import TAB_BAR_HEIGHT, DockLayout, Rect
 from scripts.ui.menus import MainMenuBar
 from scripts.ui.panel import Panel
+from scripts.ui.panels.asset_properties import AssetProperties
 from scripts.ui.panels.explorer import ExplorerPanel
 from scripts.ui.panels.status_bar import StatusBar
 from scripts.ui.panels.tabs import TabBar
@@ -42,6 +43,8 @@ class EditorScreen(Panel):
         self.explorer = ExplorerPanel()
         self.status = StatusBar()
         self.tab_bar = TabBar()
+
+        self.asset_property = AssetProperties()
 
     def sync(self):
         """Rebind sub-panels to current engine services.
@@ -141,6 +144,8 @@ class EditorScreen(Panel):
         if not self.layout.begin_fixed("##sidebar_right", rect):
             imgui.end()
             return
+
+        self.asset_property.draw()
         imgui.end()
 
 

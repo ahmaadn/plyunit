@@ -34,3 +34,10 @@ ASSET_OPEN_REQUESTED = "asset.open_requested"
 # payload parameter (``asset_id=<list[ActionTab]>``).
 TAB_ACTION_REQUEST = "tab_bar.action_requested"
 """A tab-bar action was requested."""
+
+
+ASSET_CHANGED = "asset_property.change"
+REGION_SELECTED = "asset_property.region_selected"
+ASSET_FIT_REQUESTED = "asset_property.fit_request"
+ASSET_ZOOM_ACTUAL_REQUESTED = "asset_property.zoom_actual_requested"
+ASSET_GRID_CHANGE_REQUESTED = "asset_property.grid_change_requested"
