@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from plyunit.core.types import RectType
+from plyunit.core.types import PosType, RectType
 
 
 def aabb_intersects(a: RectType, b: RectType) -> bool:
@@ -43,9 +43,7 @@ def aabb_contains(a: RectType, b: RectType) -> bool:
     )
 
 
-def aabb_from_center(
-    cx: float, cy: float, half_w: float, half_h: float
-) -> RectType:
+def aabb_from_center(cx: float, cy: float, half_w: float, half_h: float) -> RectType:
     """Create an AABB from a center point and half-extents.
 
     Args:
@@ -111,3 +109,20 @@ def expand_aabb(rect: RectType, margin: float) -> RectType:
         rect[2] + margin * 2,
         rect[3] + margin * 2,
     )
+
+
+def contains(point: PosType, rect: RectType) -> bool:
+    """Check if a point (x, y) is inside a rectangle (rx, ry, rw, rh).
+
+    Args:
+        point: A tuple of ``(x, y)`` coordinates (e.g., mouse position).
+        rect: A tuple of ``(rx, ry, rw, rh)`` representing the rectangle.
+
+    Returns:
+        ``True`` if the point is inside or on the edge of the rectangle,
+        ``False`` otherwise.
+    """
+    px, py = point
+    rx, ry, rw, rh = rect
+
+    return rx <= px <= rx + rw and ry <= py <= ry + rh

@@ -50,6 +50,8 @@ def test_keyboard_defers_key_events(
 
     kb = Input()
     isolated_registry.register(kb)
+    kb._bus = bus
+    kb.emit_to_bus = True
     kb.map("jump", 32)
 
     received: list[str] = []
@@ -178,6 +180,7 @@ def test_mouse_defers_button_events(
     # Rebuild MAP after patch is not needed if MAP already resolved constants.
     mouse = Mouse()
     isolated_registry.register(mouse)
+    mouse._bus = bus
 
     payloads: list[dict] = []
     bus.subscribe(
@@ -244,7 +247,7 @@ def test_keyboard_edges_once_per_multi_substep(
         ),
     )
 
-    kb = Input()
+    kb = Input(emit_to_bus=True)
     isolated_registry.register(kb)
     kb.map("jump", 32)
 

@@ -10,8 +10,7 @@ from collections.abc import Callable
 
 import numpy as np
 
-# Single default capacity constant (configurable via init max_sprites).
-MAX_SPRITES = 16384
+from plyunit._constants import MAX_SPRITES
 
 _DEPTH_SORT_LAYERS: frozenset[int] = frozenset()
 

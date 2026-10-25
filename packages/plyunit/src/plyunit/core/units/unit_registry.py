@@ -50,7 +50,11 @@ class UnitRegistry:
 
     @staticmethod
     def _tag_key(tag: str) -> str:
-        """Normalize a tag for case-insensitive index lookups."""
+        """Normalize a tag for case-insensitive index lookups.
+
+        Query paths (``group``/``one``/``one_or_none``) inline this ``lower()``
+        call for speed; keep both in sync if normalization changes.
+        """
         return tag.lower()
 
     def contains(self, unit: Unit) -> bool:
@@ -94,7 +98,7 @@ class UnitRegistry:
         if previous is app:
             return
         if previous is not None:
-            for service in reversed(tuple(self._service_order.values())):
+            for service in reversed(self._service_order.values()):
                 if service is previous:
                     continue
                 detach = getattr(service, "_detach_from_app", None)
@@ -114,7 +118,7 @@ class UnitRegistry:
         """Return this App's attached services in reverse registration order."""
         return [
             service
-            for service in reversed(tuple(self._service_order.values()))
+            for service in reversed(self._service_order.values())
             if getattr(service, "_attached_app", None) is app
         ]
 
@@ -214,31 +218,17 @@ class UnitRegistry:
             List of matching units (possibly empty).
         """
         if not isinstance(unit_ref, str):
-            return list(self._by_type.get(unit_ref, {}).values())
+            bucket = self._by_type.get(unit_ref)
+            return list(bucket.values()) if bucket is not None else []
         if unit_ref:
-            if unit_ref[0] == TAG_QUERY:
-                return self.find_by_tag(unit_ref[1:])
-            if unit_ref[0] == UNIQUE_QUERY:
-                return self.find_unique_name(unit_ref[1:])
+            prefix = unit_ref[0]
+            if prefix == TAG_QUERY:
+                bucket = self._by_tag.get(unit_ref[1:].lower())
+                return list(bucket.values()) if bucket is not None else []
+            if prefix == UNIQUE_QUERY:
+                unit = self._unique_name.get(unit_ref[1:])
+                return [unit] if unit is not None else []
         return self.find_by_name(unit_ref)
-
-    @staticmethod
-    def _one_from_bucket[T](bucket, label: str | T | type[T]) -> T:
-        """Return the single unit in ``bucket``; raise on empty or ambiguous."""
-        if not bucket:
-            raise NoResultFound(f"No rows found for {label} one()")
-        if len(bucket) > 1:
-            raise MultipleResultsFound(f"Multiple rows found for {label} one()")
-        return next(iter(bucket.values()))
-
-    @staticmethod
-    def _one_or_none_from_bucket[T](bucket, label: str | T | type[T]) -> T | None:
-        """Return the single unit in ``bucket`` or ``None``; raise if ambiguous."""
-        if not bucket:
-            return None
-        if len(bucket) > 1:
-            raise MultipleResultsFound(f"Multiple rows found for {label} one_or_none()")
-        return next(iter(bucket.values()))
 
     @overload
     def one[T](self, unit_ref: type[T]) -> T: ...
@@ -258,18 +248,34 @@ class UnitRegistry:
             MultipleResultsFound: If more than one unit matches.
         """
         if not isinstance(unit_ref, str):
-            return self._one_from_bucket(self._by_type.get(unit_ref), unit_ref)
+            bucket = self._by_type.get(unit_ref)
+            if not bucket:
+                raise NoResultFound(f"No rows found for {unit_ref} one()")
+            if len(bucket) > 1:
+                raise MultipleResultsFound(f"Multiple rows found for {unit_ref} one()")
+            return next(iter(bucket.values()))
         if unit_ref:
-            if unit_ref[0] == TAG_QUERY:
-                return self._one_from_bucket(
-                    self._by_tag.get(self._tag_key(unit_ref[1:])), unit_ref
-                )
-            if unit_ref[0] == UNIQUE_QUERY:
+            prefix = unit_ref[0]
+            if prefix == TAG_QUERY:
+                bucket = self._by_tag.get(unit_ref[1:].lower())
+                if not bucket:
+                    raise NoResultFound(f"No rows found for {unit_ref} one()")
+                if len(bucket) > 1:
+                    raise MultipleResultsFound(
+                        f"Multiple rows found for {unit_ref} one()"
+                    )
+                return next(iter(bucket.values()))
+            if prefix == UNIQUE_QUERY:
                 unit = self._unique_name.get(unit_ref[1:])
                 if unit is None:
                     raise NoResultFound(f"No rows found for {unit_ref} one()")
                 return unit
-        return self._one_from_bucket(self._by_name.get(unit_ref), unit_ref)
+        bucket = self._by_name.get(unit_ref)
+        if not bucket:
+            raise NoResultFound(f"No rows found for {unit_ref} one()")
+        if len(bucket) > 1:
+            raise MultipleResultsFound(f"Multiple rows found for {unit_ref} one()")
+        return next(iter(bucket.values()))
 
     @overload
     def one_or_none[T](self, unit_ref: type[T]) -> T | None: ...
@@ -288,15 +294,35 @@ class UnitRegistry:
             MultipleResultsFound: If more than one unit matches.
         """
         if not isinstance(unit_ref, str):
-            return self._one_or_none_from_bucket(self._by_type.get(unit_ref), unit_ref)
-        if unit_ref:
-            if unit_ref[0] == TAG_QUERY:
-                return self._one_or_none_from_bucket(
-                    self._by_tag.get(self._tag_key(unit_ref[1:])), unit_ref
+            bucket = self._by_type.get(unit_ref)
+            if bucket is None:
+                return None
+            if len(bucket) > 1:
+                raise MultipleResultsFound(
+                    f"Multiple rows found for {unit_ref} one_or_none()"
                 )
-            if unit_ref[0] == UNIQUE_QUERY:
+            return next(iter(bucket.values()))
+        if unit_ref:
+            prefix = unit_ref[0]
+            if prefix == TAG_QUERY:
+                bucket = self._by_tag.get(unit_ref[1:].lower())
+                if bucket is None:
+                    return None
+                if len(bucket) > 1:
+                    raise MultipleResultsFound(
+                        f"Multiple rows found for {unit_ref} one_or_none()"
+                    )
+                return next(iter(bucket.values()))
+            if prefix == UNIQUE_QUERY:
                 return self._unique_name.get(unit_ref[1:])
-        return self._one_or_none_from_bucket(self._by_name.get(unit_ref), unit_ref)
+        bucket = self._by_name.get(unit_ref)
+        if bucket is None:
+            return None
+        if len(bucket) > 1:
+            raise MultipleResultsFound(
+                f"Multiple rows found for {unit_ref} one_or_none()"
+            )
+        return next(iter(bucket.values()))
 
 
 units = UnitRegistry()

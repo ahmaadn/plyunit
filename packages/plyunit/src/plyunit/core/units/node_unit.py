@@ -359,7 +359,7 @@ class NodeUnit(Unit):
         Used by frustum culling to skip off-screen nodes.
         Aggregates bounds from all renderable components.
         """
-        from plyunit.utils.geometry import aabb_union
+        from plyunit.utils.math import aabb_union
 
         result = None
         for component in self.iter_components():

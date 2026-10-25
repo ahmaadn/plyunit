@@ -34,7 +34,7 @@ class StencilApp(pu.App):
         _ = dt
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background(self.config.background_color)
+        self.window.clear_background((245, 245, 245, 255))
 
         # Immediate DrawScope drawing — valid inside the drawing block.
         self._draw_content()

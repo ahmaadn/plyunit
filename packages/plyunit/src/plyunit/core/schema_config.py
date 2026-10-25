@@ -8,9 +8,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Self
 
-from plyunit.core.types import ColorType
+from plyunit._constants import MAX_SPRITES
 from plyunit.utils.io import read_json
 
 logger = logging.getLogger(__name__)
@@ -183,6 +184,11 @@ class AppConfig:
     window_height: int = 600
     """Application window height in pixels."""
 
+    assets_path: Path = Path("./data")
+    """Project Root path"""
+
+    animation_path: Path | None = field(default=None)
+
     target_fps: int = 60
     """
     Desired frames per second. A value of 0 means no FPS limit.
@@ -205,14 +211,14 @@ class AppConfig:
     a spiral of death.
     """
 
-    background_color: ColorType = (245, 245, 245, 255)
-    """Application window background color."""
-
     log_level: str = "INFO"
     """Root logging level (e.g. ``"INFO"``, ``"DEBUG"``)."""
 
-    log_file_path: str | None = None
+    log_file_path: Path | str | None = None
     """Log file path. ``None`` means logging is not configured automatically."""
+
+    max_sprites: int = MAX_SPRITES
+    """FrameBuffer / UBR capacity."""
 
     physics: PhysicsConfig = field(default_factory=PhysicsConfig)
     """Optional physics configuration. Active only if ``physics.enabled``."""
@@ -232,6 +238,8 @@ class AppConfig:
                 ``max_substeps_per_frame``, ``log_level``, or the related
                 sub-configs).
         """
+        if self.max_sprites <= 0:
+            raise ValueError("Max Sprite size must be greater than zero")
         if self.window_width <= 0 or self.window_height <= 0:
             raise ValueError("window size must be greater than zero")
         if self.target_fps < 0:

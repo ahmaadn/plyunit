@@ -387,25 +387,13 @@ def test_asset_manager_load_folder_processes_configs_and_images(
     )
     (folder / "coin.png").write_text("x", encoding="utf-8")
 
-    called_assets: list[Path] = []
-    called_configs: list[dict] = []
-
-    def fake_load_asset(path: str, *, asset_id: str | None = None) -> None:
-        _ = asset_id
-        called_assets.append(Path(path))
-
-    def fake_load_from_dict(data: dict, *, asset_id: str | None = None) -> None:
-        _ = asset_id
-        called_configs.append(data)
-
-    monkeypatch.setattr(manager, "load_asset", fake_load_asset)
-    monkeypatch.setattr(manager, "load_from_dict", fake_load_from_dict)
-
-    manager.load_folder("sprites", allow_extensions=[".png"])
+    manager.load_folder("sprites")
 
     # Configs are processed via load_from_dict, standalone images via load_asset.
-    assert called_configs and called_configs[0]["id"] == "hero"
-    assert Path("sprites") / "coin.png" in called_assets
+    assert "hero" in manager._textures
+    assert manager._configs["hero"].id == "hero"
+    assert manager.get_source_rect("hero") == (0.0, 0.0, 100.0, 100.0)
+    assert "coin" in manager._textures
 
     with pytest.raises(FileNotFoundError, match="Folder tidak ada"):
         manager.load_folder("missing")
@@ -420,6 +408,7 @@ def test_asset_manager_unload_asset_paths(
     # pyrefly: ignore [bad-argument-type]
     manager = assets_module.Assets(loader=DummyLoader())
     manager._textures["hero"] = TextureData(
+        id="hero",
         texture="tex",  # type: ignore[arg-type]
         parent_id="hero",
         source_rect=(0, 0, 0, 0),
@@ -429,11 +418,11 @@ def test_asset_manager_unload_asset_paths(
     calls: list[str] = []
     monkeypatch.setattr(loader, "unload_texture", lambda tex: calls.append(str(tex)))
 
-    manager._unload_asset("hero")
+    manager.unload_asset("hero")
     assert "hero" not in manager._textures
     assert calls == ["tex"]
 
-    manager._unload_asset("missing")
+    manager.unload_asset("missing")
 
 
 def test_asset_manager_destroy_unloads_cached_textures(
@@ -445,11 +434,13 @@ def test_asset_manager_destroy_unloads_cached_textures(
     # pyrefly: ignore [bad-argument-type]
     manager = assets_module.Assets(loader=DummyLoader())
     manager._textures["hero"] = TextureData(
+        id="hero",
         texture="tex:hero",  # type: ignore[arg-type]
         parent_id="hero",
         source_rect=(0, 0, 0, 0),
     )
     manager._textures["coin"] = TextureData(
+        id="coin",
         texture="tex:coin",  # type: ignore[arg-type]
         parent_id="coin",
         source_rect=(0, 0, 0, 0),

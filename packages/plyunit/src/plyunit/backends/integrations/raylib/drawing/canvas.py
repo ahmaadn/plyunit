@@ -1642,6 +1642,6 @@ def create_triangles(
     return textures
 
 
-def clear_background(color: ColorType) -> None:
+def clear_background(color: ColorType):
     """Clear the current render target's background with the given color."""
     pr.clear_background(color)

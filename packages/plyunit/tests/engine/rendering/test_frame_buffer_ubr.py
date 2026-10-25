@@ -6,12 +6,13 @@ import numpy as np
 import pytest
 
 from plyunit.rendering.frame_buffer import (
-    MAX_SPRITES,
     FrameBuffer,
     build_runs,
     pass_name_hash,
     resolve_uv,
 )
+
+from plyunit._constants import MAX_SPRITES
 
 
 def test_max_sprites_default():

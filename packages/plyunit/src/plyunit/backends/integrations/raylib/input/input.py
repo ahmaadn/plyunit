@@ -1,197 +1,156 @@
-"""raylib input backend: action map for the keyboard (+ optional gamepad).
+"""raylib input backend: action map for the keyboard.
 
 Defines the :class:`Input` class which maps actions to keyboard
-keys and/or gamepad buttons, supports virtual axes, and defers
-``key.*`` events to :class:`~plyunit.events.event_bus.EventBus`.
+keys, supports virtual axes, and defers ``key.*`` events to
+:class:`~plyunit.events.event_bus.EventBus`.
+
+Gamepads are a separate service (``Gamepad``); they are not part of
+this action map.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import TYPE_CHECKING, Any
+import logging
+from typing import TYPE_CHECKING
 
 import pyray as pr
 
-from plyunit.backends.integrations.raylib.input.gamepad import (
-    DEFAULT_DEADZONE,
-    Gamepad,
-    _axis,
-    _button,
-    apply_deadzone,
-)
 from plyunit.backends.interfaces import IInput
 from plyunit.core.units.service_unit import ServiceUnit
-from plyunit.utils.io import read_json, write_json
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from plyunit.events.event_bus import EventBus
+    from plyunit.services.input.action_event import AxisBinding, InputEvents
 
 
 __all__ = ("Input",)
 
+logger = logging.getLogger(__name__)
+
 
 class Input(ServiceUnit, IInput):
-    """Action map for the keyboard (+ optional gamepad).
+    """Action map for the keyboard.
 
     Service name ``Input``; query with ``@Input``.
 
-    Args:
-        gamepad: ``True`` / player index / :class:`Gamepad` instance
-            to enable gamepad bindings. ``None`` means keyboard
-            only.
-        deadzone: Default dead zone for virtual axes.
-
     Attributes:
         actions: Mapping of actions to sets of keyboard key codes.
-        deadzone: Default dead zone for virtual axes.
         emit_to_bus: Whether events are deferred to the EventBus.
-        gamepad: The active :class:`Gamepad` instance, or ``None``.
     """
 
-    def __init__(
-        self,
-        *,
-        gamepad: bool | Gamepad | None = None,
-        deadzone: float = DEFAULT_DEADZONE,
-    ) -> None:
+    def __init__(self, *, emit_to_bus: bool = False) -> None:
         """Initialize an Input instance with an empty action map."""
         super().__init__("Input", tags={"service", "input"})
         self.actions: dict[str, set[int]] = {}
-        self._buttons: dict[str, set[str | int]] = {}
-        self._axes: dict[str, dict[str, Any]] = {}
-        self.deadzone = deadzone
-        self.emit_to_bus: bool = True
-        self._event_bus: EventBus | None = None
-        self.gamepad = self._init_gamepad(gamepad)
+        self.emit_to_bus: bool = emit_to_bus
+        self._axes: dict[str, AxisBinding] = {}
+        self._event_names: dict[str, InputEvents] = {}
+        self._app = None
+        self._bus = None
 
-    @staticmethod
-    def _init_gamepad(gamepad: bool | Gamepad | None) -> Gamepad | None:
-        """Create a :class:`Gamepad` instance from the config parameter.
+    def on_attach(self, app) -> None:
+        """Remember the owning app."""
+        self._app = app
 
-        Args:
-            gamepad: ``None`` / ``False`` (no gamepad), ``True``
-                (player 0), an integer (player index), or an
-                existing :class:`Gamepad` instance.
+        bus = app.one_or_none("@EventBus", scope="global")
+        if bus:
+            self._bus = bus
+        if bus is None and self.emit_to_bus:
+            self._bus = None
+            self.emit_to_bus = False
+            logger.info("Event bus not found and emit to bus auto disable")
 
-        Returns:
-            Gamepad | None: A :class:`Gamepad` instance, or ``None``
-                when disabled.
-        """
-        if gamepad is None or gamepad is False:
-            return None
-        if isinstance(gamepad, Gamepad):
-            return gamepad
-        if isinstance(gamepad, bool) and gamepad:
-            return Gamepad(0)
-        return Gamepad(gamepad)
+    def on_detach(self, app) -> None:
+        """Forget the owning app and the cached EventBus."""
+        self._app = None
+        self._bus = None
 
-    # def _resolve_bus(self) -> EventBus | None:
-    #     """Find and cache the global EventBus for deferring events.
-
-    #     Returns:
-    #         EventBus | None: The EventBus instance found, or
-    #             ``None`` when there is none.
-    #     """
-    #     if self._event_bus is not None:
-    #         return self._event_bus
-    #     bus = self.one_or_none("@EventBus", scope="global")
-    #     if bus is not None:
-    #         self._event_bus = bus
-    #     return bus
-
-    def _defer_if_listened(self, bus: EventBus, event_name: str, **kwargs: Any) -> None:
-        """Defer an event to the EventBus only when it has listeners.
+    def _events_for(self, action: str) -> InputEvents:
+        """Return the cached event names for ``action``.
 
         Args:
-            bus: Target EventBus instance.
-            event_name: Name of the event to defer.
-            **kwargs: Additional event payload.
-        """
-        if bus.has_listeners(event_name):
-            bus.defer(event_name, **kwargs)
-
-    def _allow_edge(self) -> bool:
-        """Check whether edge polling is allowed on this substep.
-
-        Returns ``True`` when there is no App or when this is the
-        first fixed step within the current wall-clock frame.
+            action: Name of the action.
 
         Returns:
-            bool: ``True`` if edge polling is allowed.
+            InputEvents: Pre-built ``key.*`` event names.
         """
-        app = self.one_or_none("@App", scope="global")
-        return True if app is None else bool(app.is_first_fixed_step)
+        events = self._event_names.get(action)
+        if events is None:
+            from plyunit.services.input.action_event import InputEvents
+
+            events = self._event_names[action] = InputEvents.for_action(action)
+        return events
 
     def update(self, dt: float) -> None:
         """Poll all actions and defer ``key.*`` events to the EventBus.
+
+        An action is only polled for an event when something is
+        listening to it, which avoids needless raylib calls.
 
         Args:
             dt: Delta time of the current frame, in seconds. Not
                 used directly; raylib polling is frame-based.
         """
-        if not self.emit_to_bus or not self.actions:
+        if not self._bus or not self.emit_to_bus or not self.actions:
             return
-        bus = self.one_or_none("@EventBus", scope="global")
-        if bus is None:
-            return
-        for action in self.actions:
-            payload = {"action": action, "device": "input"}
-            if self.is_pressed(action):
-                self._defer_if_listened(bus, f"key.{action}.pressed", **payload)
-            if self.is_down(action):
-                self._defer_if_listened(bus, f"key.{action}.down", **payload)
-            if self.is_released(action):
-                self._defer_if_listened(bus, f"key.{action}.released", **payload)
-            if self.is_pressed_repeat(action):
-                self._defer_if_listened(bus, f"key.{action}.repeat", **payload)
 
-    def map(
-        self,
-        action: str,
-        *keys: int,
-        buttons: Sequence[str | int] | None = None,
-    ) -> None:
-        """Bind an action to keyboard keys and/or gamepad buttons.
+        first_step = self._allow_edge()
+        for action in self.actions:
+            self._emit_action(self._bus, action, first_step)
+
+    def _emit_action(self, bus: EventBus, action: str, first_step: bool) -> None:
+        """Defer every ``key.<action>.*`` event that fired this frame.
+
+        Args:
+            bus: Target EventBus instance.
+            action: Name of the action to poll.
+            first_step: Whether this is the first fixed step; edge
+                events (pressed/released/repeat) only fire then.
+        """
+        events = self._events_for(action)
+        polls = (
+            (events.pressed, self._pressed, True),
+            (events.down, self._down, False),
+            (events.released, self._released, True),
+            (events.repeat, self._repeat, True),
+        )
+        for name, poll, edge_only in polls:
+            if edge_only and not first_step:
+                continue
+            if bus.has_listeners(name) and poll(action):
+                bus.defer(name, action=action, device="Input")
+
+    def map(self, action: str, *keys: int) -> None:
+        """Bind an action to keyboard keys.
 
         Examples::
 
             input.map("jump", pr.KEY_SPACE, pr.KEY_UP)
-            input.map("jump", pr.KEY_SPACE, buttons=["a"])
 
         Args:
             action: Name of the action to map.
             *keys: One or more raylib keyboard key codes.
-            buttons: Optional list of gamepad button names.
         """
-        if action not in self.actions:
-            self.actions[action] = set()
-        if keys:
-            self.actions[action].update(keys)
-        if buttons:
-            self._buttons.setdefault(action, set()).update(buttons)
+        self.actions.setdefault(action, set()).update(keys)
 
     def unmap(self, action: str, *keys: int) -> None:
         """Unbind an action or specific keyboard keys from an action.
 
-        If ``keys`` is empty, the entire action (including gamepad
-        buttons) is removed. If ``keys`` are given, only those keys
-        are unbound; the action is removed when no keys remain.
+        If ``keys`` is empty, the entire action is removed. If
+        ``keys`` are given, only those keys are unbound; the action
+        is removed when no keys remain.
 
         Args:
             action: Name of the action to unbind.
             *keys: Specific keyboard keys to unbind (optional).
         """
-        if action not in self.actions:
+        bound_keys = self.actions.get(action)
+        if bound_keys is None:
             return
-        if not keys:
-            del self.actions[action]
-            self._buttons.pop(action, None)
-            return
-        for key in keys:
-            self.actions[action].discard(key)
-        if not self.actions[action] and action not in self._buttons:
+        bound_keys.difference_update(keys)
+        if not keys or not bound_keys:
             del self.actions[action]
 
     def map_axis(
@@ -200,36 +159,52 @@ class Input(ServiceUnit, IInput):
         *,
         key_neg: Sequence[int] | None = None,
         key_pos: Sequence[int] | None = None,
-        pad_axis: str | int | None = None,
-        pad_buttons_neg: Sequence[str | int] | None = None,
-        pad_buttons_pos: Sequence[str | int] | None = None,
-        deadzone: float | None = None,
     ) -> None:
-        """Define a 1D virtual axis from keys and/or an analog stick.
+        """Define a 1D virtual axis from keyboard keys.
 
         Args:
             name: Name of the virtual axis.
             key_neg: Keyboard keys for the negative direction.
             key_pos: Keyboard keys for the positive direction.
-            pad_axis: Gamepad analog axis name/constant (optional).
-            pad_buttons_neg: Gamepad buttons for the negative direction.
-            pad_buttons_pos: Gamepad buttons for the positive direction.
-            deadzone: Dead zone override; ``None`` means use
-                ``self.deadzone``.
         """
-        self._axes[name] = {
-            "key_neg": list(key_neg or ()),
-            "key_pos": list(key_pos or ()),
-            "pad_axis": pad_axis,
-            "pad_buttons_neg": list(pad_buttons_neg or ()),
-            "pad_buttons_pos": list(pad_buttons_pos or ()),
-            "deadzone": self.deadzone if deadzone is None else deadzone,
-        }
+        from plyunit.services.input.action_event import AxisBinding
+
+        self._axes[name] = AxisBinding(
+            key_neg=tuple(key_neg or ()),
+            key_pos=tuple(key_pos or ()),
+        )
+
+    def _allow_edge(self) -> bool:
+        """Check whether edge polling is allowed on this substep.
+
+        Edge polling only runs on the first fixed step within the
+        current wall-clock frame. Without an App (isolated unit
+        tests), edges stay active.
+
+        Returns:
+            bool: ``True`` if edge polling is allowed.
+        """
+        app = self._app
+        return app is None or bool(app.is_first_fixed_step)
+
+    def _pressed(self, action: str) -> bool:
+        """Edge-press check without the fixed-step gate."""
+        return any(map(pr.is_key_pressed, self.actions.get(action, ())))
+
+    def _down(self, action: str) -> bool:
+        """Held-down check."""
+        return any(map(pr.is_key_down, self.actions.get(action, ())))
+
+    def _released(self, action: str) -> bool:
+        """Edge-release check without the fixed-step gate."""
+        return any(map(pr.is_key_released, self.actions.get(action, ())))
+
+    def _repeat(self, action: str) -> bool:
+        """Auto-repeat check without the fixed-step gate."""
+        return any(map(pr.is_key_pressed_repeat, self.actions.get(action, ())))
 
     def is_pressed(self, action: str) -> bool:
         """Check whether an action was just pressed (edge).
-
-        Checks keyboard keys and gamepad buttons (when active).
 
         Args:
             action: Name of the action to check.
@@ -237,19 +212,10 @@ class Input(ServiceUnit, IInput):
         Returns:
             bool: ``True`` if the action was pressed this frame.
         """
-        if not self._allow_edge():
-            return False
-        if any(pr.is_key_pressed(k) for k in self.actions.get(action, ())):
-            return True
-        pad = self.gamepad
-        if pad is None or not pad.is_available():
-            return False
-        return any(pad.is_pressed(b) for b in self._buttons.get(action, ()))
+        return self._allow_edge() and self._pressed(action)
 
     def is_pressed_repeat(self, action: str) -> bool:
         """Check whether an action is pressed with auto-repeat (edge).
-
-        Only checks keyboard keys (gamepad not included).
 
         Args:
             action: Name of the action to check.
@@ -257,14 +223,10 @@ class Input(ServiceUnit, IInput):
         Returns:
             bool: ``True`` if the action repeated this frame.
         """
-        if not self._allow_edge():
-            return False
-        return any(pr.is_key_pressed_repeat(k) for k in self.actions.get(action, ()))
+        return self._allow_edge() and self._repeat(action)
 
     def is_down(self, action: str) -> bool:
         """Check whether an action is currently held down.
-
-        Checks keyboard keys and gamepad buttons (when active).
 
         Args:
             action: Name of the action to check.
@@ -272,17 +234,10 @@ class Input(ServiceUnit, IInput):
         Returns:
             bool: ``True`` if the action is currently held.
         """
-        if any(pr.is_key_down(k) for k in self.actions.get(action, ())):
-            return True
-        pad = self.gamepad
-        if pad is None or not pad.is_available():
-            return False
-        return any(pad.is_down(b) for b in self._buttons.get(action, ()))
+        return self._down(action)
 
     def is_released(self, action: str) -> bool:
         """Check whether an action was just released (edge).
-
-        Checks keyboard keys and gamepad buttons (when active).
 
         Args:
             action: Name of the action to check.
@@ -290,27 +245,21 @@ class Input(ServiceUnit, IInput):
         Returns:
             bool: ``True`` if the action was released this frame.
         """
-        if not self._allow_edge():
-            return False
-        if any(pr.is_key_released(k) for k in self.actions.get(action, ())):
-            return True
-        pad = self.gamepad
-        if pad is None or not pad.is_available():
-            return False
-        return any(pad.is_released(b) for b in self._buttons.get(action, ()))
+        return self._allow_edge() and self._released(action)
 
     def is_up(self, action: str) -> bool:
-        """Check whether an action is currently not pressed.
+        """Check whether none of an action's keys are pressed.
 
-        Only checks keyboard keys.
+        Unmapped actions return ``False``.
 
         Args:
             action: Name of the action to check.
 
         Returns:
-            bool: ``True`` if none of the action's keys are pressed.
+            bool: ``True`` if every key of the action is up.
         """
-        return any(pr.is_key_up(k) for k in self.actions.get(action, ()))
+        keys = self.actions.get(action)
+        return bool(keys) and all(map(pr.is_key_up, keys))
 
     def get_axis(self, left: str, right: str | None = None) -> float:
         """Get an axis value from two action names or one named axis.
@@ -329,19 +278,10 @@ class Input(ServiceUnit, IInput):
         """
         if right is None:
             return self._named_axis(left)
-
-        value = 0.0
-        if self.is_down(left):
-            value -= 1.0
-        if self.is_down(right):
-            value += 1.0
-        return value
+        return float(self._down(right)) - float(self._down(left))
 
     def _named_axis(self, name: str) -> float:
-        """Compute the value of a named virtual axis from keyboard+gamepad bindings.
-
-        Combines contributions from discrete buttons and the analog
-        stick, keeping the value with the largest absolute magnitude.
+        """Compute the value of a named virtual axis.
 
         Args:
             name: Name of the virtual axis defined via
@@ -354,26 +294,9 @@ class Input(ServiceUnit, IInput):
         binding = self._axes.get(name)
         if binding is None:
             return 0.0
-        value = 0.0
-        if any(pr.is_key_down(k) for k in binding["key_neg"]):
-            value -= 1.0
-        if any(pr.is_key_down(k) for k in binding["key_pos"]):
-            value += 1.0
-
-        pad = self.gamepad
-        if pad is not None and pad.is_available():
-            if binding["pad_axis"] is not None:
-                raw = pr.get_gamepad_axis_movement(
-                    pad.player, _axis(binding["pad_axis"])
-                )
-                value = _max_abs(value, apply_deadzone(raw, binding["deadzone"]))
-            for b in binding["pad_buttons_neg"]:
-                if pr.is_gamepad_button_down(pad.player, _button(b)):
-                    value = _max_abs(value, -1.0)
-            for b in binding["pad_buttons_pos"]:
-                if pr.is_gamepad_button_down(pad.player, _button(b)):
-                    value = _max_abs(value, 1.0)
-        return value
+        positive = any(map(pr.is_key_down, binding.key_pos))
+        negative = any(map(pr.is_key_down, binding.key_neg))
+        return float(positive) - float(negative)
 
     def get_vector(self, axis_x: str, axis_y: str) -> tuple[float, float]:
         """Get an X and Y axis pair as a 2D vector.
@@ -386,88 +309,3 @@ class Input(ServiceUnit, IInput):
             tuple[float, float]: The ``(x, y)`` pair.
         """
         return (self.get_axis(axis_x), self.get_axis(axis_y))
-
-    def load(self, path: str | Path) -> None:
-        """Load action/axis mappings from a JSON file.
-
-        Supports two schemas: (1) ``{"actions": {...}, "axes": {...}}``
-        or (2) the simple ``{action: [keys]}`` format.
-
-        Args:
-            path: Path to the JSON file.
-
-        Raises:
-            FileNotFoundError: If the file is not found.
-            ValueError: If the extension is not ``.json``.
-        """
-        path = Path(path)
-        if not path.is_file():
-            raise FileNotFoundError(f"Input mapping file not found: {path}")
-        if path.suffix.lower() != ".json":
-            raise ValueError(f"Input mapping must be JSON (.json); got {path.suffix!r}")
-        data = read_json(path)
-        if "actions" in data or "axes" in data:
-            for action, binding in (data.get("actions") or {}).items():
-                self.map(
-                    action,
-                    *list(binding.get("keys") or ()),
-                    buttons=binding.get("buttons"),
-                )
-            for name, binding in (data.get("axes") or {}).items():
-                self.map_axis(
-                    name,
-                    key_neg=binding.get("key_neg"),
-                    key_pos=binding.get("key_pos"),
-                    pad_axis=binding.get("pad_axis"),
-                    pad_buttons_neg=binding.get("pad_buttons_neg"),
-                    pad_buttons_pos=binding.get("pad_buttons_pos"),
-                    deadzone=binding.get("deadzone"),
-                )
-            return
-        for action, keys in data.items():
-            self.map(action, *keys)
-
-    def save(self, path: str | Path) -> None:
-        """Save action/axis mappings to a JSON file.
-
-        Writes the full ``{"actions": {...}, "axes": {...}}`` schema
-        including keyboard keys and gamepad buttons.
-
-        Args:
-            file: Destination path for the JSON file.
-        """
-        path = Path(path)
-        data = {
-            "actions": {
-                name: {
-                    "keys": sorted(self.actions.get(name, ())),
-                    "buttons": sorted(str(b) for b in self._buttons.get(name, ())),
-                }
-                for name in set(self.actions) | set(self._buttons)
-            },
-            "axes": {
-                name: {
-                    "key_neg": list(b["key_neg"]),
-                    "key_pos": list(b["key_pos"]),
-                    "pad_axis": b["pad_axis"],
-                    "pad_buttons_neg": list(b["pad_buttons_neg"]),
-                    "pad_buttons_pos": list(b["pad_buttons_pos"]),
-                    "deadzone": b["deadzone"],
-                }
-                for name, b in self._axes.items()
-            },
-        }
-        write_json(path, data)
-
-
-def _max_abs(a: float, b: float) -> float:
-    """Return the value with the largest absolute magnitude of two values.
-
-    Args:
-        a: First value.
-        b: Second value.
-
-    Returns:
-        float: ``b`` if ``abs(b) > abs(a)``, otherwise ``a``.
-    """
-    return b if abs(b) > abs(a) else a

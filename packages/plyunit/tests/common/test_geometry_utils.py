@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from plyunit.utils.geometry import (
+from plyunit.utils.math import (
     aabb_contains,
     aabb_from_center,
     aabb_intersects,

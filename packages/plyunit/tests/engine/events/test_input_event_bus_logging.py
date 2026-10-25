@@ -12,8 +12,8 @@ import plyunit as pu
 import plyunit.backends.integrations.raylib.input as input_module
 import plyunit.backends.integrations.raylib.input.input as keyboard_module
 import plyunit.backends.integrations.raylib.input.mouse as mouse_module
-from plyunit.events.event_bus import EventBus
 from plyunit.core.logging import configure_logging
+from plyunit.events.event_bus import EventBus
 
 unit_module = importlib.import_module("plyunit.core.units.unit")
 
@@ -102,14 +102,13 @@ def test_event_bus_does_not_retain_bound_method_owner(
     assert calls == [1]
 
 
-def test_input_load_map_and_action_queries(
+def test_input_map_and_action_queries(
     isolated_registry: pu.UnitRegistry,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path,
 ) -> None:
     _ = isolated_registry
 
-    state = {
+    state: dict[str, set[int]] = {
         "pressed": set(),
         "repeat": set(),
         "down": set(),
@@ -129,10 +128,9 @@ def test_input_load_map_and_action_queries(
 
     input_service = input_module.Input()
 
-    config_path = tmp_path / "input.json"
-    config_path.write_text('{"left": [1], "right": [2], "jump": [3, 4]}')
-
-    input_service.load(config_path)
+    input_service.map("left", 1)
+    input_service.map("right", 2)
+    input_service.map("jump", 3, 4)
 
     assert input_service.actions["left"] == {1}
     assert input_service.actions["right"] == {2}
@@ -169,20 +167,6 @@ def test_input_load_map_and_action_queries(
     input_service.unmap("jump", 4)
     assert "jump" not in input_service.actions
 
-    missing = tmp_path / "missing.json"
-    with pytest.raises(FileNotFoundError):
-        input_service.load(missing)
-
-    invalid_path = tmp_path / "input.txt"
-    invalid_path.write_text("{}")
-    with pytest.raises(ValueError, match="JSON"):
-        input_service.load(invalid_path)
-
-    ini_path = tmp_path / "input.ini"
-    ini_path.write_text("[keys]\nleft=1")
-    with pytest.raises(ValueError, match="JSON"):
-        input_service.load(ini_path)
-
 
 def test_mouse_update_and_cursor_controls(
     isolated_registry: pu.UnitRegistry,
@@ -213,6 +197,7 @@ def test_mouse_update_and_cursor_controls(
     fake_pr = SimpleNamespace(
         Vector2=FakeVector2,
         get_mouse_position=lambda: state["mouse_pos"],
+        get_mouse_delta=lambda: FakeVector2(5.0, 7.0),
         get_mouse_x=lambda: 11,
         get_mouse_y=lambda: 22,
         set_mouse_position=set_mouse_position,

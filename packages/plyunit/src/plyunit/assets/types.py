@@ -96,6 +96,16 @@ class TextureProperty:
             color_key=color_key if color_key is not None else base.color_key,
         )
 
+    def to_dict(self):
+        return TextureConfig(
+            filter=self.filter,
+            wrap=self.wrap,
+            mipmap=self.mipmap,
+            srgb=self.srgb,
+            premultiply_alpha=self.premultiply_alpha,
+            color_key=self.color_key,
+        )
+
 
 @dataclass(slots=True)
 class ImageData:
@@ -111,7 +121,6 @@ class ImageData:
         config_path: Path of the JSON configuration file (when loaded
             from disk).
     """
-
     id: str
     image_path: Path
     name: str | None = None
@@ -170,16 +179,21 @@ class TextureData:
     """In-memory texture data (the Assets cache).
 
     Attributes:
+        id: ID of the texture asset
         parent_id: ID of the main/parent asset (itself when standalone).
         texture: GPU texture object (backend-specific, satisfies the Texture Protocol).
         source_rect: The specific texture area (x, y, w, h).
-        name: Optional display name for the texture.
     """
 
+    id: str
     parent_id: str
     texture: Texture
     source_rect: tuple[float, float, float, float]
-    name: str | None = None
+
+
+# --------------
+# JSON SCHEMA
+# --------------
 
 
 class TextureConfig(TypedDict, total=False):

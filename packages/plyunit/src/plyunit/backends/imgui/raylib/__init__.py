@@ -26,10 +26,9 @@ except ImportError as exc:  # pragma: no cover - depends on env
     ) from exc
 
 from .backend import ImGuiBackend
-from .service import ImGui, build_imgui_service
+from .service import ImGui
 
 __all__ = [
     "ImGui",
     "ImGuiBackend",
-    "build_imgui_service",
 ]

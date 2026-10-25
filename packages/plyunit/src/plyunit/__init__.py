@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from plyunit._version import __version__ as __version__
 
 if TYPE_CHECKING:
+    from plyunit._bootstrap import create_app, init
     from plyunit.assets import (
         AnimationClip as AnimationClip,
         AnimationFrame as AnimationFrame,
@@ -53,10 +54,8 @@ if TYPE_CHECKING:
         ShaderLoader as ShaderLoader,
         StreamingTexture as StreamingTexture,
         Window as Window,
-        create_app as create_app,
         get_assets_loader as get_assets_loader,
         get_shader_loader as get_shader_loader,
-        init as init,
     )
     from plyunit.backends.physics import (
         AABB as AABB,
@@ -236,9 +235,10 @@ _LAZY_MODULES = {
     # Tilemap
     "TileMapNode": "plyunit.tilemap",
     "AutotileProcessor": "plyunit.tilemap",
+    # _bootstrap
+    "init": "plyunit._bootstrap",
+    "create_app": "plyunit._bootstrap",
     # Integration backend
-    "init": "plyunit.backends.integrations",
-    "create_app": "plyunit.backends.integrations",
     "Camera2D": "plyunit.backends.integrations",
     "Canvas": "plyunit.backends.integrations",
     "BatchingBackend": "plyunit.backends.integrations",

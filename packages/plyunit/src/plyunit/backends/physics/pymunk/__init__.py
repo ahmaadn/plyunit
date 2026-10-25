@@ -42,26 +42,6 @@ from .pymunk_adapter import PhysicsBackend
 from .service import Physics
 from .static_body import StaticBody
 
-
-def build_physics_service(cfg) -> Physics:
-    """Build a ``Physics`` service from a ``PhysicsConfig`` (factory composition root).
-
-    Separates backend parameterization from ``Physics``: the pymunk backend
-    is built here and then injected into ``Physics`` via DI.
-    """
-    backend = PhysicsBackend(
-        gravity=cfg.gravity,
-        spatial_hash_dim=cfg.spatial_hash_dim,
-        spatial_hash_count=cfg.spatial_hash_count,
-        sleep_time_threshold=cfg.sleep_time_threshold,
-        idle_speed_threshold=cfg.idle_speed_threshold,
-        iterations=cfg.iterations,
-        damping=cfg.damping,
-        enable_spatial_hash=cfg.enable_spatial_hash,
-    )
-    return Physics(backend, world_bounds=cfg.world_bounds)
-
-
 __all__ = [
     # Types
     "AABB",

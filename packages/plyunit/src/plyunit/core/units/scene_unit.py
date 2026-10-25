@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 from warnings import deprecated
 
 from plyunit.rendering.enum import BlendMode, Layer
-from plyunit.utils.geometry import (
+from plyunit.utils.math import (
     aabb_intersection,
     aabb_intersects,
     expand_aabb,

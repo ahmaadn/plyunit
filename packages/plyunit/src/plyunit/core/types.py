@@ -6,41 +6,64 @@ engine components without depending on the renderer backend.
 
 import array
 from collections.abc import Sequence
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 type ColorType = tuple[int, int, int, int]
-"""Alias for ``tuple[int, int, int, int]`` for RGBA colors."""
+"""RGBA color representation (red, green, blue, alpha)."""
 
 type Vec2Type = tuple[float, float]
-"""Alias for ``tuple[float, float]`` for 2D vectors or positions."""
+"""2D vector or point (x, y)."""
 
 type RectType = tuple[float, float, float, float]
-"""Alias for ``tuple[float, float, float, float]`` for rectangles
-``(x, y, width, height)``."""
+"""Rectangle geometry defined by (x, y, width, height)."""
 
-type PosType = tuple[float, float]
-"""Alias for ``tuple[float, float]`` for 2D positions."""
+type PosType = Vec2Type
+"""2D spatial position (x, y)."""
 
-type SizeType = tuple[float, float]
-"""Alias for ``tuple[float, float]`` for width and height."""
+type SizeType = Vec2Type
+"""2D dimensions (width, height)."""
 
-type SourceRectType = tuple[float, float, float, float]
-"""Alias for ``tuple[float, float, float, float]`` for source rects
-``(x, y, width, height)`` inside a texture."""
+type SourceRectType = RectType
+"""Source rectangle (x, y, width, height) defining a sub-region of a texture."""
 
 type PosFlatType = array.array[float] | Sequence[float]
-"""Alias for a flat sequence of positions ``[x0, y0, x1, y1, ...]`` (batch submit)."""
+"""Flat sequence of positions [x0, y0, x1, y1, ...] optimized for batch submissions."""
 
 type PosNestedType = Sequence[PosType]
-"""Alias for a nested sequence of positions ``[(x0, y0), (x1, y1), ...]``."""
+"""Nested sequence of positions [(x0, y0), (x1, y1), ...]."""
 
 
+@runtime_checkable
+class PrColor(Protocol):
+    """4-component R8G8B8A8 (32-bit) color."""
+
+    r: int
+    g: int
+    b: int
+    a: int
+
+
+@runtime_checkable
+class Vector2Type(Protocol):
+    """2D vector components."""
+
+    x: float
+    y: float
+
+
+@runtime_checkable
+class RectangleType(Protocol):
+    """Rectangle geometry components."""
+
+    x: float
+    y: float
+    width: float
+    height: float
+
+
+@runtime_checkable
 class Texture(Protocol):
-    """Protocol for GPU texture objects.
-
-    Objects satisfying this protocol must expose the GPU texture ID,
-    dimensions, mipmap count, and internal format.
-    """
+    """GPU texture object properties."""
 
     id: int
     width: int
@@ -49,17 +72,26 @@ class Texture(Protocol):
     format: int
 
 
-class RectangleType(Protocol):
-    """Protocol for rectangle objects (x, y, width, height)."""
+@runtime_checkable
+class RenderTexture(Protocol):
+    """RenderTexture (FBO) for render-to-texture operations."""
 
-    x: float
-    y: float
-    width: float
-    height: float
+    id: int
+    texture: Texture
+    depth: Texture
 
 
+@runtime_checkable
+class ShaderType(Protocol):
+    """GPU shader program."""
+
+    id: int
+    locs: Sequence[int]  # Array of shader uniform locations
+
+
+@runtime_checkable
 class NPatchInfoType(Protocol):
-    """Protocol for NPatch (nine-patch) layout info."""
+    """NPatch (nine-patch) layout configuration for scalable textures."""
 
     source: RectangleType
     left: int
@@ -69,43 +101,13 @@ class NPatchInfoType(Protocol):
     layout: int
 
 
+@runtime_checkable
 class FontType(Protocol):
-    """Protocol for font objects (glyph atlas + metrics)."""
+    """Font object containing a glyph atlas texture and rendering metrics."""
 
     baseSize: int
     glyphCount: int
     glyphPadding: int
     texture: Texture
-    recs: Any
-    glyphs: Any
-
-
-class PrColor(Protocol):
-    """Protocol for 4-component R8G8B8A8 (32-bit) colors."""
-
-    r: int
-    g: int
-    b: int
-    a: int
-
-
-class Vector2Type(Protocol):
-    """Protocol for 2D vectors (2 components)."""
-
-    x: float
-    y: float
-
-
-class ShaderType(Protocol):
-    """Protocol for GPU shaders."""
-
-    id: int
-    locs: Any
-
-
-class RenderTexture(Protocol):
-    """Protocol for RenderTexture (FBO for render-to-texture)."""
-
-    id: int
-    texture: Texture
-    depth: Texture
+    recs: Sequence[RectangleType]
+    glyphs: Sequence[Any]  # Replace Any with a GlyphInfo protocol if available

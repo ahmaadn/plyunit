@@ -90,7 +90,7 @@ class Animations(ServiceUnit):
             when loading textures.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, asset_base_path: Path = Path("")) -> None:
         """Initialize the animation manager with empty storage.
 
         Creates empty clip and group registries, plus the internal
@@ -101,7 +101,7 @@ class Animations(ServiceUnit):
         self.groups: dict[str, set[str]] = defaultdict(set)
         self._clip_to_group: dict[str, str] = {}
 
-        self.base_path = Path("")
+        self.base_path = asset_base_path
 
     def add_clip(self, clip: AnimationClip, *, group: str | None = None) -> None:
         """Add a new animation clip to the storage.

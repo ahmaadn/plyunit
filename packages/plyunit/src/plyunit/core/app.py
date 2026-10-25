@@ -22,12 +22,14 @@ from .schema_config import (
 )
 
 if TYPE_CHECKING:
-    from plyunit.assets import Animations, Assets
-    from plyunit.backends.integrations import Camera2D
-    from plyunit.backends.interfaces.i_renderer import ICanvas2D, IWindow
+    from packages.plyunit.src.plyunit.backends.interfaces import IWindow
+    from plyunit.assets import Assets
+    from plyunit.assets.animations import Animations
+    from plyunit.backends.interfaces import ICamera2D, ICanvas2D
     from plyunit.core.units.service_unit import ServiceUnit
-    from plyunit.rendering.renderer import Renderer
+    from plyunit.rendering import Renderer
     from plyunit.services.scene_manager import SceneManager
+
 
 __all__ = (
     "App",
@@ -65,6 +67,7 @@ class App(ServiceUnit):
         self._is_app_root = True
         super().__init__("App", tags={"app"})
         self.running: bool = False
+        self._shutdown_done = False
 
         # Signal
         self.on_load_complete = Signal("on_app_load_complete")
@@ -76,8 +79,7 @@ class App(ServiceUnit):
         self.on_after_update = Signal("on_app_after_update")
         self.on_end_update = Signal("on_app_end_update")
 
-        # Services — populated by ``init`` (or manually).
-        # pyrefly: ignore [bad-assignment]
+        # Services
         self.config: AppConfig = None
         self.window: IWindow = None
         self.canvas: ICanvas2D = None
@@ -85,11 +87,7 @@ class App(ServiceUnit):
         self.scene_manager: SceneManager = None
         self.assets: Assets = None
         self.animations: Animations = None
-        # initialized at load time, since it may need access to the scene
-        # or other units
-        self.camera: Camera2D | None = None
-
-        self._shutdown_done = False
+        self.camera: ICamera2D = None
 
         # Fixed-step catch-up bookkeeping (set each wall-clock frame).
         self._last_fixed_steps: int = 0
@@ -152,7 +150,7 @@ class App(ServiceUnit):
                 self.config.title,
             )
             self.window.begin_drawing()
-            self.window.clear_background(self.config.background_color)
+            self.window.clear_background((245, 245, 245, 255))
             self.window.end_drawing()
 
             if self.renderer is not None:
@@ -164,10 +162,6 @@ class App(ServiceUnit):
         if self.window is not None:
             self.window.set_fixed_timestep_hz(self.config.fixed_update_hz)
             self.window.max_frame_delta_time = self.config.max_frame_delta_time
-
-        # Optional logging — only when a file path is given
-        if self.config.log_file_path is not None:
-            self.setup_logging(self.config.log_level, self.config.log_file_path)
 
         # Set max_frame_delta_time from config
         self.on_init_complete.emit()
@@ -305,10 +299,6 @@ class App(ServiceUnit):
     def _end_frame(self) -> None:
         """Internal hook: emit ``on_end_frame`` at the end of every frame."""
         self.on_end_frame.emit()
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     def step_fixed(self) -> int:
         """Run 0..N fixed substeps, consuming the accumulator from ``Window``.

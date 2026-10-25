@@ -15,8 +15,8 @@ import numpy as np
 import pyray as pr
 import raylib as rl
 
+from plyunit._constants import MAX_SPRITES
 from plyunit.backends.interfaces import IUnifiedBufferBatch
-from plyunit.rendering.frame_buffer import MAX_SPRITES
 
 logger = logging.getLogger(__name__)
 

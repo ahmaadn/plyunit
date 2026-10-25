@@ -5,26 +5,23 @@ from unittest.mock import MagicMock
 import pytest
 
 from plyunit.assets.animations import Animations
-from plyunit.assets.assets import Assets
+from plyunit.assets.assets import AssetPaths, Assets
 
 
 @pytest.fixture
 def mock_assets(tmp_path):
     assets = MagicMock(spec=Assets)
     assets._loader = MagicMock()
-    assets._asset_base_path = tmp_path
-    assets._resolve_under_base.side_effect = (
-        lambda x: Path(x) if Path(x).is_absolute() else tmp_path / x
-    )
+    assets._paths = AssetPaths(tmp_path)
     assets.unit = MagicMock()
-    assets._register_region = MagicMock()
-    assets._regions = {}
     assets._configs = {}
 
     # Bind the real methods to the mock object
     assets.load_spritesheet = Assets.load_spritesheet.__get__(assets)
     assets.load_from_dict = Assets.load_from_dict.__get__(assets)
-    assets._resolve_config_image_path = Assets._resolve_config_image_path.__get__(assets)
+    assets._load_config = Assets._load_config.__get__(assets)
+    assets._read_config = Assets._read_config.__get__(assets)
+    assets._register_regions = Assets._register_regions.__get__(assets)
     return assets
 
 
@@ -58,18 +55,18 @@ def test_assets_load_spritesheet(mock_assets, mock_animations, tmp_path):
     # Mock methods
     mock_assets._loader.load_texture_from_dict.return_value = mock_texture
 
-    # Need to simulate what get_source_rect returns after _register_region is called
+    # Capture what the real _register_regions caches via _put
     regions_store = {}
-    def fake_register_region(alias, t_data):
-        regions_store[alias] = t_data
-    mock_assets._register_region.side_effect = fake_register_region
+    def fake_put(t_data):
+        regions_store[t_data.id] = t_data
+    mock_assets._put.side_effect = fake_put
 
     # Call loader
     mock_assets.load_spritesheet(str(config_file), asset_id="test_sheet")
 
     # Verify texture loaded
     mock_assets._loader.load_texture_from_dict.assert_called_once()
-    mock_assets._cache_texture.assert_called_once_with("test_sheet", mock_texture)
+    mock_assets._store_root.assert_called_once_with("test_sheet", mock_texture)
 
     # Verify regions registered
     assert "region_1" in regions_store
@@ -139,7 +136,7 @@ def test_assets_load_spritesheet_fallback_sheet_id(mock_assets, mock_animations,
 
     mock_assets.load_spritesheet(str(config_file), asset_id=None)
 
-    mock_assets._cache_texture.assert_called_once_with("my_sheet", mock_assets._loader.load_texture_from_dict.return_value)
+    mock_assets._store_root.assert_called_once_with("my_sheet", mock_assets._loader.load_texture_from_dict.return_value)
 
 
 def test_assets_load_spritesheet_only_one_argument(mock_assets, mock_animations, tmp_path):
@@ -158,7 +155,7 @@ def test_assets_load_spritesheet_only_one_argument(mock_assets, mock_animations,
     # Call with only one argument (config_path)
     mock_assets.load_spritesheet(str(config_file))
 
-    mock_assets._cache_texture.assert_called_once_with("config_sheet_id", mock_assets._loader.load_texture_from_dict.return_value)
+    mock_assets._store_root.assert_called_once_with("config_sheet_id", mock_assets._loader.load_texture_from_dict.return_value)
 
 
 
@@ -180,4 +177,4 @@ def test_assets_load_spritesheet_override_id(mock_assets, mock_animations, tmp_p
     # Call with override parameter asset_id
     mock_assets.load_spritesheet(str(config_file), asset_id="override_sheet_id")
 
-    mock_assets._cache_texture.assert_called_once_with("override_sheet_id", mock_assets._loader.load_texture_from_dict.return_value)
+    mock_assets._store_root.assert_called_once_with("override_sheet_id", mock_assets._loader.load_texture_from_dict.return_value)

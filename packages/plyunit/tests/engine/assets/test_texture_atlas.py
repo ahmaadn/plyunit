@@ -95,6 +95,7 @@ def make_manager(loader: AtlasDummyLoader) -> assets_module.Assets:
 
 def inject_asset(manager: assets_module.Assets, texture: FakeTexture) -> None:
     manager._textures[texture.name] = TextureData(
+        id=texture.name,
         texture=texture,  # type: ignore[arg-type]
         parent_id=texture.name,
         source_rect=(0.0, 0.0, float(texture.width), float(texture.height)),
@@ -106,6 +107,7 @@ def inject_region(
     manager: assets_module.Assets, parent_id: str, region_id: str, rect: tuple[int, ...]
 ) -> None:
     manager._textures[region_id] = TextureData(
+        id=region_id,
         texture=manager._textures[parent_id].texture,  # type: ignore[arg-type]
         parent_id=parent_id,
         source_rect=(

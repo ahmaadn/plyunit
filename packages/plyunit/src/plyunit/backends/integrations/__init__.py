@@ -17,8 +17,6 @@ from typing import TYPE_CHECKING
 
 from plyunit.backends._selector import integration_module
 
-from ._bootstrap import create_app, init
-
 _active_integration = None
 
 
@@ -83,10 +81,6 @@ if TYPE_CHECKING:
 
     # INPUT MODULE
     from .raylib.input import (
-        GAMEPAD_AXES as GAMEPAD_AXES,
-        GAMEPAD_BUTTONS as GAMEPAD_BUTTONS,
-        MAP_BUTTON_MOUSE as MAP_BUTTON_MOUSE,
-        MAP_CURSOR_MOUSE as MAP_CURSOR_MOUSE,
         Gamepad as Gamepad,
         Input as Input,
         Mouse as Mouse,
@@ -96,10 +90,6 @@ if TYPE_CHECKING:
 
 __all__ = (
     "FILTER_MODE_MAP",
-    "GAMEPAD_AXES",
-    "GAMEPAD_BUTTONS",
-    "MAP_BUTTON_MOUSE",
-    "MAP_CURSOR_MOUSE",
     "WRAP_MODE_MAP",
     "AssetsLoader",
     "AudioBackend",
@@ -117,7 +107,6 @@ __all__ = (
     "Window",
     "audio_backend",
     "begin_stencil_mask",
-    "create_app",
     "create_streaming_texture",
     "destroy_streaming_texture",
     "end_stencil_mask",
@@ -131,7 +120,6 @@ __all__ = (
     "get_shader_loader",
     "get_unified_buffer_batch",
     "get_window",
-    "init",
     "init_stencil",
     "init_streaming",
     "is_stencil_active",
@@ -184,10 +172,6 @@ _SUBS = {
     "is_streaming_available": "drawing",
     "update_streaming_texture": "drawing",
     # Input
-    "GAMEPAD_AXES": "input",
-    "GAMEPAD_BUTTONS": "input",
-    "MAP_BUTTON_MOUSE": "input",
-    "MAP_CURSOR_MOUSE": "input",
     "Gamepad": "input",
     "Input": "input",
     "Mouse": "input",

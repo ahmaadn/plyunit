@@ -15,6 +15,7 @@ from warnings import deprecated
 
 import numpy as np
 
+from plyunit._constants import MAX_SPRITES
 from plyunit.core.types import (
     ColorType,
     PrColor,
@@ -26,12 +27,11 @@ from plyunit.core.types import (
 )
 from plyunit.core.units.service_unit import ServiceUnit
 from plyunit.rendering.draw_primitive import draw_primitive
-from plyunit.utils.geometry import aabb_intersection
+from plyunit.utils.math import aabb_intersection
 
 from .draw_scope import DrawScope
 from .enum import BlendMode, Layer, PrimitiveKind, RenderKind
 from .frame_buffer import (
-    MAX_SPRITES,
     FrameBuffer,
     build_depth_runs,
     build_runs,

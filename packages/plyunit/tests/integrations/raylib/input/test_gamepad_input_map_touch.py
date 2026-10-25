@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -8,7 +7,7 @@ import pytest
 import plyunit as pu
 import plyunit.backends.integrations.raylib.input.gamepad as gamepad_mod
 import plyunit.backends.integrations.raylib.input.input as input_mod
-from plyunit.backends.integrations.raylib.input.gamepad import Gamepad, apply_deadzone
+from plyunit.backends.integrations.raylib.input.gamepad import Gamepad, _apply_deadzone
 from plyunit.backends.integrations.raylib.input.input import Input
 
 unit_module = __import__("plyunit.core.units.unit", fromlist=["units"])
@@ -23,8 +22,8 @@ def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> pu.UnitRegistry:
 
 
 def test_apply_deadzone() -> None:
-    assert apply_deadzone(0.1, 0.15) == 0.0
-    assert apply_deadzone(0.5, 0.15) == 0.5
+    assert _apply_deadzone(0.1, 0.15) == 0.0
+    assert _apply_deadzone(0.5, 0.15) == 0.5
 
 
 def test_gamepad_poll(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -37,9 +36,9 @@ def test_gamepad_poll(monkeypatch: pytest.MonkeyPatch) -> None:
         "name": "FakePad",
         "vib": [],
     }
-    a = gamepad_mod.GAMEPAD_BUTTONS["a"]
-    lx = gamepad_mod.GAMEPAD_AXES["left_x"]
-    ly = gamepad_mod.GAMEPAD_AXES["left_y"]
+    a = gamepad_mod.MAP_GAMEPAD_BUTTONS["a"]
+    lx = gamepad_mod.MAP_GAMEPAD_AXES["left_x"]
+    ly = gamepad_mod.MAP_GAMEPAD_AXES["left_y"]
 
     monkeypatch.setattr(
         gamepad_mod,
@@ -97,7 +96,7 @@ def test_input_keyboard_only(
             is_key_up=lambda k: k not in state["down"],
         ),
     )
-    inp = Input()
+    inp = Input(emit_to_bus=True)
     isolated_registry.register(inp)
     inp.map("jump", 32)
 
@@ -108,108 +107,46 @@ def test_input_keyboard_only(
     state["down"] = {32}
     assert inp.is_pressed("jump")
     assert inp.is_down("jump")
+    app = SimpleNamespace(
+        is_first_fixed_step=True,
+        one_or_none=lambda ref, scope="global": bus if ref == "@EventBus" else None,
+    )
+    inp.on_attach(app)
     inp.update(0.016)
     bus.dispatch()
     assert "p" in received and "d" in received
 
 
-def test_input_with_gamepad(
+def test_input_virtual_axis_from_keys(
     isolated_registry: pu.UnitRegistry,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    a = gamepad_mod.GAMEPAD_BUTTONS["a"]
-    lx = gamepad_mod.GAMEPAD_AXES["left_x"]
-    pad_state = {
-        "available": True,
-        "pressed": set(),
-        "down": set(),
-        "released": set(),
-        "axes": {},
-    }
-    key_state = {"pressed": set(), "down": set(), "released": set(), "repeat": set()}
-
-    def pr_ns(**extra):
-        base = {
-            "is_key_pressed": lambda k: k in key_state["pressed"],
-            "is_key_down": lambda k: k in key_state["down"],
-            "is_key_released": lambda k: k in key_state["released"],
-            "is_key_pressed_repeat": lambda k: k in key_state["repeat"],
-            "is_key_up": lambda k: k not in key_state["down"],
-            "is_gamepad_available": lambda p: pad_state["available"],
-            "get_gamepad_name": lambda p: "pad",
-            "is_gamepad_button_pressed": lambda p, b: b in pad_state["pressed"],
-            "is_gamepad_button_down": lambda p, b: b in pad_state["down"],
-            "is_gamepad_button_released": lambda p, b: b in pad_state["released"],
-            "is_gamepad_button_up": lambda p, b: b not in pad_state["down"],
-            "get_gamepad_axis_movement": lambda p, ax: float(
-                pad_state["axes"].get(ax, 0.0)
-            ),
-            "set_gamepad_vibration": lambda *a: None,
-        }
-        base.update(extra)
-        return SimpleNamespace(**base)
-
-    monkeypatch.setattr(input_mod, "pr", pr_ns())
-    monkeypatch.setattr(gamepad_mod, "pr", pr_ns())
-
-    # pyrefly: ignore [bad-instantiation]
-    pad = Gamepad()
-    isolated_registry.register(pad)
-    inp = Input(gamepad=pad)
-    isolated_registry.register(inp)
-    inp.map("jump", 32, buttons=["a"])
-    inp.map_axis(
-        "move_x",
-        key_neg=[65],
-        key_pos=[68],
-        pad_axis="left_x",
-        pad_buttons_neg=["dpad_left"],
-        pad_buttons_pos=["dpad_right"],
-        deadzone=0.15,
-    )
-
-    key_state["pressed"] = {32}
-    assert inp.is_pressed("jump")
-    key_state["pressed"] = set()
-    pad_state["pressed"] = {a}
-    assert inp.is_pressed("jump")
-
-    key_state["down"] = {65}
-    assert inp.get_axis("move_x") == -1.0
-    key_state["down"] = set()
-    pad_state["axes"][lx] = 0.9
-    assert inp.get_axis("move_x") == 0.9
-    pad_state["axes"][lx] = 0.0
-    dpad_r = gamepad_mod.GAMEPAD_BUTTONS["dpad_right"]
-    pad_state["down"] = {dpad_r}
-    assert inp.get_axis("move_x") == 1.0
-
-
-def test_input_json_roundtrip(
-    isolated_registry: pu.UnitRegistry,
-    tmp_path: Path,
-) -> None:
     _ = isolated_registry
-    inp = Input(gamepad=True)
-    inp.map("jump", 32, buttons=["a"])
-    inp.map_axis("move_x", key_neg=[65], key_pos=[68], pad_axis="left_x")
-    path = tmp_path / "bindings.json"
-    inp.save(path)
-    other = Input(gamepad=True)
-    other.load(path)
-    assert 32 in other.actions["jump"]
-    assert "a" in other._buttons["jump"]
-    assert "move_x" in other._axes
+    state = {"pressed": set(), "down": set(), "released": set(), "repeat": set()}
+    monkeypatch.setattr(
+        input_mod,
+        "pr",
+        SimpleNamespace(
+            is_key_pressed=lambda k: k in state["pressed"],
+            is_key_down=lambda k: k in state["down"],
+            is_key_released=lambda k: k in state["released"],
+            is_key_pressed_repeat=lambda k: k in state["repeat"],
+            is_key_up=lambda k: k not in state["down"],
+        ),
+    )
+    inp = Input()
+    inp.map_axis("move_x", key_neg=[65], key_pos=[68])
 
-    flat = tmp_path / "flat.json"
-    flat.write_text('{"shoot": [17]}', encoding="utf-8")
-    other.load(flat)
-    assert 17 in other.actions["shoot"]
-
-    ini = tmp_path / "x.ini"
-    ini.write_text("[x]", encoding="utf-8")
-    with pytest.raises(ValueError, match="JSON"):
-        other.load(ini)
+    state["down"] = {65}
+    assert inp.get_axis("move_x") == -1.0
+    state["down"] = set()
+    state["down"] = {68}
+    assert inp.get_axis("move_x") == 1.0
+    state["down"] = {65, 68}
+    assert inp.get_axis("move_x") == 0.0
+    state["down"] = set()
+    assert inp.get_axis("move_x") == 0.0
+    assert inp.get_axis("unmapped") == 0.0
 
 
 def test_touch_edges(monkeypatch: pytest.MonkeyPatch) -> None:

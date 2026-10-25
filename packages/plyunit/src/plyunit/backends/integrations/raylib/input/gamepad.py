@@ -1,20 +1,24 @@
-"""raylib gamepad service unit and button/action mapping constants.
-
-Defines the button (``BUTTONS``) and axis (``AXES``) mapping
-constants, the default dead zone value, name conversion helpers, the
-``apply_deadzone`` function, and the :class:`Gamepad` class for
-polling a single gamepad by player index.
-"""
+"""raylib gamepad service unit and button/action mapping constants."""
 
 from __future__ import annotations
+
+from functools import cache
+from typing import TYPE_CHECKING, Any
 
 import pyray as pr
 
 from plyunit._constants import DEFAULT_DEADZONE
-from plyunit.backends.interfaces.i_input import GAMEPAD_BUTTON_KEY, IGamepad
+from plyunit.backends.interfaces.i_input import IGamepad
 from plyunit.core.units.service_unit import ServiceUnit
 
-__all__ = ["GAMEPAD_AXES", "GAMEPAD_BUTTONS", "Gamepad"]
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from plyunit.services.input._types import GamepadAxis, GamepadButton
+
+__all__ = ("Gamepad",)
+
+# A button/axis is addressed by user-facing name or raw raylib constant.
 
 
 # Mapping of gamepad button names (PlayStation & Xbox aliases) to
@@ -25,7 +29,7 @@ __all__ = ["GAMEPAD_AXES", "GAMEPAD_BUTTONS", "Gamepad"]
 #   Stick click: ls, rs
 #   D-pad: dpad_up, dpad_down, dpad_left, dpad_right
 #   Middle: start, select, guide
-GAMEPAD_BUTTONS: dict[GAMEPAD_BUTTON_KEY, int] = {
+MAP_GAMEPAD_BUTTONS: dict[GamepadButton, int] = {
     "a": pr.GamepadButton.GAMEPAD_BUTTON_RIGHT_FACE_DOWN,
     "cross": pr.GamepadButton.GAMEPAD_BUTTON_RIGHT_FACE_DOWN,
     "b": pr.GamepadButton.GAMEPAD_BUTTON_RIGHT_FACE_RIGHT,
@@ -55,7 +59,7 @@ GAMEPAD_BUTTONS: dict[GAMEPAD_BUTTON_KEY, int] = {
 #   left_x / left_y: left stick (horizontal / vertical)
 #   right_x / right_y: right stick (horizontal / vertical)
 #   left_trigger / right_trigger: L2 / R2 triggers
-GAMEPAD_AXES: dict[str, int] = {
+MAP_GAMEPAD_AXES: dict[GamepadAxis, int] = {
     "left_x": pr.GamepadAxis.GAMEPAD_AXIS_LEFT_X,
     "left_y": pr.GamepadAxis.GAMEPAD_AXIS_LEFT_Y,
     "right_x": pr.GamepadAxis.GAMEPAD_AXIS_RIGHT_X,
@@ -64,37 +68,63 @@ GAMEPAD_AXES: dict[str, int] = {
     "right_trigger": pr.GamepadAxis.GAMEPAD_AXIS_RIGHT_TRIGGER,
 }
 
-# Default dead zone for analog axes; values below this threshold are
-# treated as zero to avoid stick drift.
 
-
-def _button(name: str | int) -> int:
-    """Convert a gamepad button name to a raylib integer constant.
+def _resolve_constant(
+    name: str | int,
+    table: Mapping[Any, int],  # keys are Literal names; Mapping is key-invariant
+    kind: str,
+) -> int:
+    """Resolve a name (or pass through a raw constant) via ``table``.
 
     Args:
-        name: Button name (string, mapped via ``BUTTONS``) or an
+        name: Name looked up case-insensitively, or an
             already-valid integer constant.
+        table: Name -> raylib constant mapping.
+        kind: Human-readable kind (``"button"``/``"axis"``) used in
+            the error message.
+
+    Returns:
+        int: The raylib constant.
+
+    Raises:
+        ValueError: If ``name`` is a string not present in ``table``.
+    """
+    if isinstance(name, int):
+        return name
+    try:
+        return table[name.lower()]
+    except KeyError:
+        raise ValueError(f"Unknown gamepad {kind} {name!r}") from None
+
+
+@cache
+def _button(name: GamepadButton) -> int:
+    """Convert a gamepad button name to a raylib integer constant.
+
+    Results are memoized; this runs every frame for polled buttons.
+
+    Args:
+        name: Button name (string, mapped via ``MAP_GAMEPAD_BUTTONS``) or
+            an already-valid integer constant.
 
     Returns:
         int: The raylib button constant.
 
     Raises:
         ValueError: If ``name`` is a string not recognized in
-            ``BUTTONS``.
+            ``MAP_GAMEPAD_BUTTONS``.
     """
-    if isinstance(name, int):
-        return name
-    key = name.lower()
-    if key not in GAMEPAD_BUTTONS:
-        raise ValueError(f"Unknown gamepad button {name!r}")
-    return GAMEPAD_BUTTONS[key]
+    return _resolve_constant(name, MAP_GAMEPAD_BUTTONS, "button")
 
 
-def _axis(name: str | int) -> int:
+@cache
+def _axis(name: GamepadAxis) -> int:
     """Convert a gamepad axis name to a raylib integer constant.
 
+    Results are memoized; this runs every frame for polled axes.
+
     Args:
-        name: Axis name (string, mapped via ``AXES``) or an
+        name: Axis name (string, mapped via ``MAP_GAMEPAD_AXES``) or an
             already-valid integer constant.
 
     Returns:
@@ -102,17 +132,12 @@ def _axis(name: str | int) -> int:
 
     Raises:
         ValueError: If ``name`` is a string not recognized in
-            ``AXES``.
+            ``MAP_GAMEPAD_AXES``.
     """
-    if isinstance(name, int):
-        return name
-    key = name.lower()
-    if key not in GAMEPAD_AXES:
-        raise ValueError(f"Unknown gamepad axis {name!r}")
-    return GAMEPAD_AXES[key]
+    return _resolve_constant(name, MAP_GAMEPAD_AXES, "axis")
 
 
-def apply_deadzone(value: float, deadzone: float = DEFAULT_DEADZONE) -> float:
+def _apply_deadzone(value: float, deadzone: float = DEFAULT_DEADZONE) -> float:
     """Apply a dead zone to an analog axis value.
 
     If the absolute value is smaller than ``deadzone``, return
@@ -130,6 +155,7 @@ def apply_deadzone(value: float, deadzone: float = DEFAULT_DEADZONE) -> float:
     return 0.0 if abs(value) < deadzone else value
 
 
+# TODO : CURRENTLY NOT TESTED TO REAL GAMEPAD
 class Gamepad(ServiceUnit, IGamepad):
     """Poll a single gamepad by player index (device service).
 
@@ -148,10 +174,17 @@ class Gamepad(ServiceUnit, IGamepad):
 
     def __init__(self, player: int = 0, *, deadzone: float = DEFAULT_DEADZONE) -> None:
         """Initialize a Gamepad instance for the given player index."""
-        name = "Gamepad" if player == 0 else f"Gamepad{player}"
+        name = "Gamepad" if player == 0 else f"Gamepad_{player}"
         super().__init__(name, tags={"service", "input", "gamepad"})
         self.player = player
         self.deadzone = deadzone
+        self._app = None
+
+    def on_attach(self, app):
+        self._app = app
+
+    def on_detach(self, app):
+        self._app = None
 
     def _allow_edge(self) -> bool:
         """Check whether edge polling is allowed on this substep.
@@ -163,8 +196,7 @@ class Gamepad(ServiceUnit, IGamepad):
         Returns:
             bool: ``True`` if edge polling is allowed.
         """
-        app = self.one_or_none("@App", scope="global")
-        return True if app is None else bool(app.is_first_fixed_step)
+        return self._app is None or bool(self._app.is_first_fixed_step)
 
     def is_available(self) -> bool:
         """Check whether a gamepad is available at this player index.
@@ -181,7 +213,7 @@ class Gamepad(ServiceUnit, IGamepad):
             return ""
         return pr.get_gamepad_name(self.player) or ""
 
-    def is_pressed(self, button: str | int) -> bool:
+    def is_pressed(self, button: GamepadButton) -> bool:
         """Check whether a gamepad button was just pressed (edge).
 
         Args:
@@ -195,7 +227,7 @@ class Gamepad(ServiceUnit, IGamepad):
             return False
         return pr.is_gamepad_button_pressed(self.player, _button(button))
 
-    def is_down(self, button: str | int) -> bool:
+    def is_down(self, button: GamepadButton) -> bool:
         """Check whether a gamepad button is currently held down.
 
         Args:
@@ -209,7 +241,7 @@ class Gamepad(ServiceUnit, IGamepad):
             return False
         return pr.is_gamepad_button_down(self.player, _button(button))
 
-    def is_released(self, button: str | int) -> bool:
+    def is_released(self, button: GamepadButton) -> bool:
         """Check whether a gamepad button was just released (edge).
 
         Args:
@@ -223,7 +255,7 @@ class Gamepad(ServiceUnit, IGamepad):
             return False
         return pr.is_gamepad_button_released(self.player, _button(button))
 
-    def is_up(self, button: str | int) -> bool:
+    def is_up(self, button: GamepadButton) -> bool:
         """Check whether a gamepad button is currently not pressed.
 
         Args:
@@ -231,13 +263,14 @@ class Gamepad(ServiceUnit, IGamepad):
                 constant.
 
         Returns:
-            bool: ``True`` if the button is released / inactive.
+            bool: ``True`` if the button is released / inactive
+                (also when the gamepad is unavailable).
         """
         if not self.is_available():
             return True
         return pr.is_gamepad_button_up(self.player, _button(button))
 
-    def get_axis(self, axis: str | int, *, deadzone: float | None = None) -> float:
+    def get_axis(self, axis: GamepadAxis, *, deadzone: float | None = None) -> float:
         """Get an analog axis value after applying the dead zone.
 
         Args:
@@ -252,12 +285,12 @@ class Gamepad(ServiceUnit, IGamepad):
         if not self.is_available():
             return 0.0
         raw = pr.get_gamepad_axis_movement(self.player, _axis(axis))
-        return apply_deadzone(raw, self.deadzone if deadzone is None else deadzone)
+        return _apply_deadzone(raw, self.deadzone if deadzone is None else deadzone)
 
     def get_vector(
         self,
-        axis_x: str | int = "left_x",
-        axis_y: str | int = "left_y",
+        axis_x: GamepadAxis = "left_x",
+        axis_y: GamepadAxis = "left_y",
         *,
         deadzone: float | None = None,
     ) -> tuple[float, float]:

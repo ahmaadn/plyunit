@@ -26,7 +26,11 @@ class FakeRectangle:
 
 
 class FakeCameraObject:
-    def __init__(self, offset, target, rotation: float, zoom: float):
+    def __init__(self, offset=None, target=None, rotation: float = 0.0, zoom: float = 1.0):
+        if offset is None:
+            offset = FakeVector2(0.0, 0.0)
+        if target is None:
+            target = FakeVector2(0.0, 0.0)
         if isinstance(offset, tuple):
             self.offset = FakeVector2(offset[0], offset[1])
         else:

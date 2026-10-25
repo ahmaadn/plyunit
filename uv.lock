@@ -12,6 +12,7 @@ members = [
     "plyunit",
     "plyunit-native",
     "plyunit-workspace",
+    "test-editor-assets",
 ]
 
 [[package]]
@@ -1123,6 +1124,17 @@ sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
 ]
+
+[[package]]
+name = "test-editor-assets"
+version = "0.1.0"
+source = { virtual = "projects/test-editor-assets" }
+dependencies = [
+    { name = "plyunit", extra = ["native", "raylib"] },
+]
+
+[package.metadata]
+requires-dist = [{ name = "plyunit", extras = ["raylib", "native"], editable = "packages/plyunit" }]
 
 [[package]]
 name = "typing-extensions"

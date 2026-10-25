@@ -217,7 +217,7 @@ def test_app_config_from_dict_and_from_file(monkeypatch: pytest.MonkeyPatch) -> 
             "fixed_update_hz": 120,
             "max_frame_delta_time": 0.2,
             "max_substeps_per_frame": 8,
-            "background_color": (1, 2, 3, 255),
+            "assets_path": "./data",
         }
     )
 

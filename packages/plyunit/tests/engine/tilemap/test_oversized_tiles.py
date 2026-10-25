@@ -64,6 +64,7 @@ def make_node(sizes: dict[str, tuple[float, float]], layers: dict) -> TileMapNod
     """Build a node with the given asset sizes and layer metadata."""
     regions = {
         alias: TextureData(
+            id=alias,
             parent_id="sheet",
             texture=MagicMock(name=alias),
             source_rect=(0.0, 0.0, w, h),

@@ -46,11 +46,10 @@ def test_app_config_from_dict_nested_imgui() -> None:
 
 
 def test_build_imgui_service_from_config() -> None:
-    from plyunit.backends.imgui.raylib import ImGui, build_imgui_service
+    from plyunit.backends.imgui.raylib import ImGui
 
-    svc = build_imgui_service(
-        app_module.ImGuiConfig(enabled=True, dark_style=False, no_ini=True)
-    )
+    cfg = app_module.ImGuiConfig(enabled=True, dark_style=False, no_ini=True)
+    svc = ImGui(dark_style=cfg.dark_style, no_ini=cfg.no_ini)
     assert isinstance(svc, ImGui)
     assert svc.active is False
 

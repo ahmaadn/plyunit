@@ -15,16 +15,21 @@ Exposed protocols:
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Literal, Protocol, runtime_checkable
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from plyunit._constants import DEFAULT_DEADZONE
 
+if TYPE_CHECKING:
+    from plyunit.services.input._types import (
+        CursorShape,
+        GamepadAxis,
+        GamepadButton,
+        MouseButton,
+    )
+
+
 __all__ = (
-    "BUTTON_MOUSE_KEY",
-    "CURSOR_MOUSE_KEY",
-    "GAMEPAD_AXIS_KEY",
-    "GAMEPAD_BUTTON_KEY",
     "IGamepad",
     "IInput",
     "IMouse",
@@ -41,48 +46,35 @@ __all__ = (
 class IInput(Protocol):
     """Action map + edge-state service for keyboard / mouse / gamepad / touch.
 
-    Backends implement this and expose it as ``Input``. Domain code treats
-    it as a ``ServiceUnit`` (``plyunit.services.input.Input`` is the type alias that
-    resolves to the active backend's class).
+    Backends implement this and expose it as ``Input``.
     """
 
     actions: dict[str, set[int]]
-    deadzone: float
     emit_to_bus: bool
-    gamepad: IGamepad | None
 
-    def __init__(
-        self,
-        *,
-        gamepad: bool | IGamepad | None = None,
-        deadzone: float = DEFAULT_DEADZONE,
-    ) -> None:
-        """Initialize the input service.
+    def __init__(self, *, emit_to_bus: bool = False) -> None:
+        """Initialize an Input instance with an empty action map.
 
         Args:
-            gamepad: ``True`` to create a default gamepad, an existing
-                :class:`IGamepad` instance to attach, or ``None`` for no
-                gamepad.
-            deadzone: Default analog stick deadzone (0.0..1.0).
+            emit_to_bus: Whether events are deferred to the EventBus.
         """
         ...
 
-    def map(self, action: str, *key: int, buttons: list[str] | None = None) -> None:
-        """Bind keys and mouse buttons to an action.
+    def map(self, action: str, *keys: int) -> None:
+        """Bind an action to keyboard keys.
 
         Args:
-            action: Action name.
-            *key: Key codes to bind.
-            buttons: Optional mouse button names to bind.
+            action: Name of the action to map.
+            *keys: One or more keyboard key codes.
         """
         ...
 
     def unmap(self, action: str, *keys: int) -> None:
-        """Unbind keys from an action.
+        """Unbind an action or specific keyboard keys from an action.
 
         Args:
-            action: Action name.
-            *keys: Key codes to unbind; none removes all bindings.
+            action: Name of the action to unbind.
+            *keys: Specific keyboard keys to unbind (optional).
         """
         ...
 
@@ -90,106 +82,94 @@ class IInput(Protocol):
         self,
         name: str,
         *,
-        key_neg: list[int] | None = None,
-        key_pos: list[int] | None = None,
-        pad_axis: str | None = None,
-        pad_buttons_neg: list[str] | None = None,
-        pad_buttons_pos: list[str] | None = None,
-        deadzone: float | None = None,
+        key_neg: Sequence[int] | None = None,
+        key_pos: Sequence[int] | None = None,
     ) -> None:
-        """Define a named axis from keyboard keys and/or gamepad inputs.
+        """Define a 1D virtual axis from keyboard keys.
 
         Args:
-            name: Axis name.
-            key_neg: Key codes contributing -1.0.
-            key_pos: Key codes contributing +1.0.
-            pad_axis: Gamepad axis name driving the axis.
-            pad_buttons_neg: Gamepad buttons contributing -1.0.
-            pad_buttons_pos: Gamepad buttons contributing +1.0.
-            deadzone: Per-axis deadzone; ``None`` uses the service default.
+            name: Name of the virtual axis.
+            key_neg: Keyboard keys for the negative direction.
+            key_pos: Keyboard keys for the positive direction.
         """
         ...
 
     def is_pressed(self, action: str) -> bool:
-        """Check whether the action was pressed this frame (edge).
+        """Check whether an action was just pressed (edge).
 
         Args:
-            action: Action name.
+            action: Name of the action to check.
 
         Returns:
-            True on the frame the action becomes active.
+            bool: True if the action was pressed this frame.
         """
         ...
 
     def is_pressed_repeat(self, action: str) -> bool:
-        """Check whether the action is pressed with key-repeat semantics.
+        """Check whether an action is pressed with auto-repeat (edge).
 
         Args:
-            action: Action name.
+            action: Name of the action to check.
 
         Returns:
-            True while held, re-firing at the OS repeat rate.
+            bool: True if the action repeated this frame.
         """
         ...
 
     def is_down(self, action: str) -> bool:
-        """Check whether the action is currently held down.
+        """Check whether an action is currently held down.
 
         Args:
-            action: Action name.
+            action: Name of the action to check.
 
         Returns:
-            True while any bound input is down.
+            bool: True if the action is currently held.
         """
         ...
 
     def is_released(self, action: str) -> bool:
-        """Check whether the action was released this frame (edge).
+        """Check whether an action was just released (edge).
 
         Args:
-            action: Action name.
+            action: Name of the action to check.
 
         Returns:
-            True on the frame the action stops being active.
+            bool: True if the action was released this frame.
         """
         ...
 
     def is_up(self, action: str) -> bool:
-        """Check whether the action is currently not held down.
+        """Check whether none of an action's keys are pressed.
 
         Args:
-            action: Action name.
+            action: Name of the action to check.
 
         Returns:
-            True while no bound input is down.
+            bool: True if every key of the action is up.
         """
         ...
 
     def get_axis(self, left: str, right: str | None = None) -> float:
-        """Compute a 1D axis value from two actions or a mapped axis.
+        """Get an axis value from two action names or one named axis.
 
         Args:
-            left: Action contributing -1.0, or a mapped axis name.
-            right: Optional action contributing +1.0.
+            left: Negative action name (or axis name if right is None).
+            right: Positive action name (optional).
 
         Returns:
-            The axis value in -1.0..1.0.
+            float: Axis value between -1.0 and 1.0.
         """
         ...
 
-    def load(self, path: str | Path) -> None:
-        """Load the keymap (action bindings) from a file.
+    def get_vector(self, axis_x: str, axis_y: str) -> tuple[float, float]:
+        """Get an X and Y axis pair as a 2D vector.
 
         Args:
-            path: Keymap file path.
-        """
-        ...
+            axis_x: Action/axis name for the horizontal component.
+            axis_y: Action/axis name for the vertical component.
 
-    def save(self, path: str | Path) -> None:
-        """Save the current keymap (action bindings) to a file.
-
-        Args:
-            path: Keymap file path.
+        Returns:
+            tuple[float, float]: The (x, y) pair.
         """
         ...
 
@@ -197,30 +177,6 @@ class IInput(Protocol):
 # ---
 # MOUSE
 # ---
-
-BUTTON_MOUSE_KEY = Literal[
-    "left",
-    "right",
-    "middle",
-    "side",
-    "extra",
-    "forward",
-    "back",
-]
-
-CURSOR_MOUSE_KEY = Literal[
-    "arrow",
-    "ibeam",
-    "crosshair",
-    "pointing_hand",
-    "resize_ew",
-    "resize_ns",
-    "resize_nwse",
-    "resize_nesw",
-    "resize_all",
-    "not_allowed",
-    "unknown",
-]
 
 
 @runtime_checkable
@@ -234,12 +190,10 @@ class IMouse(Protocol):
         current_cursor: Backend cursor shape enum value.
     """
 
-    position: tuple[float, float]
-    movement: tuple[float, float]
     emit_to_bus: bool
     current_cursor: int
 
-    def __init__(self, cursor: CURSOR_MOUSE_KEY = "arrow"):
+    def __init__(self, cursor: CursorShape = "arrow"):
         """Initialize the mouse service.
 
         Args:
@@ -247,13 +201,10 @@ class IMouse(Protocol):
         """
         ...
 
-    def update(self, dt: float) -> None:
-        """Refresh mouse state for the current frame.
-
-        Args:
-            dt: Frame delta time in seconds.
-        """
-        ...
+    @property
+    def position(self) -> tuple[float, float]: ...
+    @property
+    def movement(self) -> tuple[float, float]: ...
 
     @property
     def x(self) -> int:
@@ -294,7 +245,7 @@ class IMouse(Protocol):
         """Disable the cursor (hide and lock it from moving)."""
         ...
 
-    def is_down(self, button: BUTTON_MOUSE_KEY) -> bool:
+    def is_down(self, button: MouseButton) -> bool:
         """Check whether a mouse button is currently held down.
 
         Args:
@@ -305,7 +256,7 @@ class IMouse(Protocol):
         """
         ...
 
-    def is_pressed(self, button: BUTTON_MOUSE_KEY) -> bool:
+    def is_pressed(self, button: MouseButton) -> bool:
         """Check whether a mouse button was pressed this frame (edge).
 
         Args:
@@ -316,7 +267,7 @@ class IMouse(Protocol):
         """
         ...
 
-    def is_released(self, button: BUTTON_MOUSE_KEY) -> bool:
+    def is_released(self, button: MouseButton) -> bool:
         """Check whether a mouse button was released this frame (edge).
 
         Args:
@@ -327,7 +278,7 @@ class IMouse(Protocol):
         """
         ...
 
-    def set_cursor(self, cursor: CURSOR_MOUSE_KEY) -> None:
+    def set_cursor(self, cursor: CursorShape) -> None:
         """Set the cursor shape.
 
         Args:
@@ -343,7 +294,7 @@ class IMouse(Protocol):
         """
         ...
 
-    def get_cursor_name(self) -> CURSOR_MOUSE_KEY:
+    def get_cursor_name(self) -> CursorShape | Literal["unknown"]:
         """Get the current cursor shape name.
 
         Returns:
@@ -351,7 +302,7 @@ class IMouse(Protocol):
         """
         ...
 
-    def is_cursor(self, cursor: CURSOR_MOUSE_KEY) -> bool:
+    def is_cursor(self, cursor: CursorShape) -> bool:
         """Check whether the current cursor matches a shape name.
 
         Args:
@@ -407,7 +358,7 @@ class IGamepad(Protocol):
         """Human-readable name reported by the device."""
         ...
 
-    def is_pressed(self, button: str | int) -> bool:
+    def is_pressed(self, button: GamepadButton) -> bool:
         """Check whether a button was pressed this frame (edge).
 
         Args:
@@ -418,7 +369,7 @@ class IGamepad(Protocol):
         """
         ...
 
-    def is_down(self, button: str | int) -> bool:
+    def is_down(self, button: GamepadButton) -> bool:
         """Check whether a button is currently held down.
 
         Args:
@@ -429,7 +380,7 @@ class IGamepad(Protocol):
         """
         ...
 
-    def is_released(self, button: str | int) -> bool:
+    def is_released(self, button: GamepadButton) -> bool:
         """Check whether a button was released this frame (edge).
 
         Args:
@@ -440,7 +391,7 @@ class IGamepad(Protocol):
         """
         ...
 
-    def is_up(self, button: str | int) -> bool:
+    def is_up(self, button: GamepadButton) -> bool:
         """Check whether a button is currently not held down.
 
         Args:
@@ -451,7 +402,7 @@ class IGamepad(Protocol):
         """
         ...
 
-    def get_axis(self, axis: str) -> float:
+    def get_axis(self, axis: GamepadAxis, *, deadzone: float | None = None) -> float:
         """Read an analog axis.
 
         Args:
@@ -464,8 +415,8 @@ class IGamepad(Protocol):
 
     def get_vector(
         self,
-        axis_x: str | int = "left_x",
-        axis_y: str | int = "left_y",
+        axis_x: GamepadAxis = "left_x",
+        axis_y: GamepadAxis = "left_y",
         *,
         deadzone: float | None = None,
     ) -> tuple[float, float]:
@@ -498,39 +449,6 @@ class IGamepad(Protocol):
         ...
 
 
-GAMEPAD_BUTTON_KEY = Literal[
-    "a",
-    "cross",
-    "b",
-    "circle",
-    "x",
-    "square",
-    "y",
-    "triangle",
-    "lb",
-    "rb",
-    "lt",
-    "rt",
-    "ls",
-    "rs",
-    "dpad_up",
-    "dpad_down",
-    "dpad_left",
-    "dpad_right",
-    "start",
-    "select",
-    "guide",
-]
-
-GAMEPAD_AXIS_KEY = Literal[
-    "left_x",
-    "left_y",
-    "right_x",
-    "right_y",
-    "left_trigger",
-    "right_trigger",
-]
-
 # ---
 # Touch
 # ---
@@ -549,14 +467,6 @@ class ITouch(Protocol):
     count: int
     position: tuple[float, float]
     emit_to_bus: bool
-
-    def update(self, dt: float):
-        """Refresh touch state for the current frame.
-
-        Args:
-            dt: Frame delta time in seconds.
-        """
-        ...
 
     def is_down(self) -> bool:
         """Check whether a touch is currently held down.

@@ -91,6 +91,7 @@ def main():
         TestAssetsApp(),
         pu.AppConfig(
             "Test Assets App",
+            assets_path=Path(__file__).resolve().parent / "data",
             window_height=720,
             window_width=1280,
             target_fps=60,

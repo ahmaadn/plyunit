@@ -383,9 +383,7 @@ class ICanvas2D(Protocol):
         """
         ...
 
-    def set_texture_filter(
-        self, target: Any, filter_mode: str = "trilinear"
-    ) -> None:
+    def set_texture_filter(self, target: Any, filter_mode: str = "trilinear") -> None:
         """Set the filtering mode of a texture.
 
         Args:
@@ -850,7 +848,7 @@ class ICanvas2D(Protocol):
         """
         ...
 
-    def clear_background(color: ColorType) -> None:
+    def clear_background(color: ColorType):
         """Clear the backbuffer to the given color.
 
         Args:

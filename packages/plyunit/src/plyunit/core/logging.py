@@ -6,10 +6,7 @@ import logging
 from pathlib import Path
 
 
-def configure_logging(
-    log_level: str,
-    log_file_path: str,
-) -> None:
+def configure_logging(log_level: str, log_file_path: str | Path) -> None:
     """Configures root logging for the application.
 
     Sets the root log level, adds a console handler (Rich when available,

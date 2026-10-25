@@ -1,12 +1,4 @@
-"""Example: Blend Modes
-
-Demonstrasi berbagai blend modes yang tersedia di plyunit.
-- ALPHA (default)
-- ADDITIVE (cocok untuk cahaya, api, laser)
-- MULTIPLIED (cocok untuk shadow overlay)
-
-Setiap mode ditampilkan sebagai panel terpisah dengan objek bergerak.
-"""
+"""Example: Blend Modes"""
 
 import math
 
@@ -14,8 +6,6 @@ import plyunit as pu
 
 
 class GlowOrb(pu.NodeUnit):
-    """Orb bercahaya — menggunakan additive blending untuk efek glow."""
-
     def __init__(self, color: tuple[int, int, int, int], radius: float = 30.0) -> None:
         super().__init__(name="GlowOrb")
         self.color = color
@@ -72,8 +62,6 @@ class GlowOrb(pu.NodeUnit):
 
 
 class ShadowOverlay(pu.NodeUnit):
-    """Overlay gelap — menggunakan multiply blending."""
-
     def __init__(self) -> None:
         super().__init__(name="ShadowOverlay")
         self.time = 0.0
@@ -101,8 +89,6 @@ class ShadowOverlay(pu.NodeUnit):
 
 
 class NormalRect(pu.NodeUnit):
-    """Kotak biasa dengan alpha blending (default)."""
-
     def __init__(self, color: tuple[int, int, int, int]) -> None:
         super().__init__(name="NormalRect")
         self.color = color
@@ -127,8 +113,6 @@ class NormalRect(pu.NodeUnit):
 
 
 class BlendPanel(pu.NodeUnit):
-    """Panel untuk menampilkan satu blend mode."""
-
     def __init__(
         self,
         title: str,
@@ -231,6 +215,10 @@ class MainScene(pu.SceneUnit):
 
 
 class BlendModeApp(pu.App):
+    scene_manager: pu.SceneManager
+    renderer: pu.Renderer
+    window: pu.Window
+
     def on_load(self) -> None:
         self.scene_manager.push(MainScene())
         self.text = pu.Text()

@@ -34,16 +34,14 @@ if TYPE_CHECKING:
     from .raylib import (
         ImGui as ImGui,
         ImGuiBackend as ImGuiBackend,
-        build_imgui_service as build_imgui_service,
     )
 
 
-__all__ = ("ImGui", "ImGuiBackend", "build_imgui_service")
+__all__ = ("ImGui", "ImGuiBackend")
 
 _SUBS = {
     "ImGuiBackend": "backend",
     "ImGui": "service",
-    "build_imgui_service": "service",
 }
 
 

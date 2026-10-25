@@ -29,7 +29,7 @@ class ImGuiApp(pu.App):
     def update(self, dt: float) -> None:
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background(self.config.background_color)
+        self.window.clear_background((245, 245, 245, 255))
         self.scene_manager.render(self.renderer)
 
         # Queued world content (ImGui is separate, immediate, post-pass).

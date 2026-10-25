@@ -18,7 +18,7 @@ queue.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from plyunit.core.units.service_unit import ServiceUnit
 
@@ -26,7 +26,6 @@ from .backend import ImGuiBackend
 
 if TYPE_CHECKING:
     from plyunit.core.app import App
-    from plyunit.core.schema_config import ImGuiConfig
 
 DrawCallback = Callable[[], None]
 """Type of argument-less callables that draw one ImGui panel."""
@@ -167,16 +166,4 @@ class ImGui(ServiceUnit):
         self._backend.render()
 
 
-def build_imgui_service(cfg: ImGuiConfig | Any) -> ImGui:
-    """Build ``ImGui`` from ``ImGuiConfig`` (composition-root factory)."""
-    return ImGui(
-        dark_style=bool(cfg.dark_style),
-        no_ini=bool(cfg.no_ini),
-    )
-
-
-__all__ = [
-    "DrawCallback",
-    "ImGui",
-    "build_imgui_service",
-]
+__all__ = ["DrawCallback", "ImGui"]

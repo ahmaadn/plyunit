@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations as integrations_mod
+import plyunit._bootstrap as bootstrap_mod
 from plyunit.core.app import App, AppConfig, AudioConfig, ImGuiConfig, PhysicsConfig
 from plyunit.core.units.service_unit import ServiceUnit
 
@@ -55,8 +56,16 @@ def test_init_default(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         "plyunit.services.scene_manager.SceneManager", lambda: fake_scene
     )
-    monkeypatch.setattr("plyunit.assets.assets.Assets", lambda: fake_assets)
-    monkeypatch.setattr("plyunit.assets.animations.Animations", lambda: fake_anims)
+    monkeypatch.setattr(
+        "plyunit.assets.assets.Assets", lambda **kwargs: fake_assets
+    )
+    monkeypatch.setattr(
+        "plyunit.assets.animations.Animations", lambda **kwargs: fake_anims
+    )
+    monkeypatch.setattr(
+        "plyunit.backends.integrations.raylib.core.Camera2D",
+        lambda **kwargs: SimpleNamespace(),
+    )
 
     class MiniApp(App):
         # pyrefly: ignore [bad-override]
@@ -65,7 +74,7 @@ def test_init_default(monkeypatch: pytest.MonkeyPatch):
             self.running = False
 
     app = MiniApp()
-    out = integrations_mod.init(
+    out = bootstrap_mod.init(
         app, AppConfig(title="t", window_width=100, window_height=100)
     )
     assert out is app
@@ -82,28 +91,38 @@ def test_bootstrap_physics_and_imgui_flags(monkeypatch: pytest.MonkeyPatch):
         lambda canvas, **kwargs: object(),
     )
     monkeypatch.setattr("plyunit.services.scene_manager.SceneManager", lambda: object())
-    monkeypatch.setattr("plyunit.assets.assets.Assets", lambda: object())
-    monkeypatch.setattr("plyunit.assets.animations.Animations", lambda: object())
-    # Patch factories on the modules bootstrap imports (lazy facades).
-    import sys
-    from types import ModuleType
+    monkeypatch.setattr("plyunit.assets.assets.Assets", lambda **kwargs: object())
+    monkeypatch.setattr(
+        "plyunit.assets.animations.Animations", lambda **kwargs: object()
+    )
+    monkeypatch.setattr(
+        "plyunit.backends.integrations.raylib.core.Camera2D",
+        lambda **kwargs: object(),
+    )
+
+    class FakePhysicsBackend(ServiceUnit):
+        def __init__(self, **kwargs) -> None:
+            super().__init__(name="physics_backend")
+            self.cfg = kwargs
 
     class FakePhysics(ServiceUnit):
-        def __init__(self, cfg) -> None:
+        def __init__(self, backend, world_bounds=None) -> None:
             super().__init__(name="phys")
-            self.cfg = cfg
+            self.backend = backend
+            self.world_bounds = world_bounds
 
     fake_phys = ModuleType("plyunit.backends.physics")
-    fake_phys.build_physics_service = FakePhysics  # type: ignore[attr-defined]
+    fake_phys.Physics = FakePhysics
+    fake_phys.PhysicsBackend = FakePhysicsBackend
     monkeypatch.setitem(sys.modules, "plyunit.backends.physics", fake_phys)
 
     class FakeImGui(ServiceUnit):
-        def __init__(self, cfg) -> None:
+        def __init__(self, **kwargs) -> None:
             super().__init__(name="imgui")
-            self.cfg = cfg
+            self.cfg = kwargs
 
     fake_imgui = ModuleType("plyunit.backends.imgui")
-    fake_imgui.build_imgui_service = FakeImGui  # type: ignore[attr-defined]
+    fake_imgui.ImGui = FakeImGui
     monkeypatch.setitem(sys.modules, "plyunit.backends.imgui", fake_imgui)
 
     class MiniApp(App):
@@ -127,7 +146,7 @@ def test_bootstrap_physics_and_imgui_flags(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setitem(sys.modules, "plyunit.audio.service", fake_audio)
 
     app = MiniApp()
-    integrations_mod.init(
+    bootstrap_mod.init(
         app,
         AppConfig(
             title="t",

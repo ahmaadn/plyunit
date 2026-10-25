@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import pyray as pr
 
 from plyunit.backends.interfaces import ICamera2D
+from plyunit.core.types import PosType, SizeType
 from plyunit.core.units.service_unit import ServiceUnit
 from plyunit.utils import math
 
@@ -54,9 +55,9 @@ class Camera2D(ServiceUnit, ICamera2D):
 
     def __init__(
         self,
-        size: tuple[int, int],
-        position: tuple[float, float] = (0.0, 0.0),
-        pivot: tuple[float, float] = (0.0, 0.0),
+        size: SizeType,
+        position: PosType = (0.0, 0.0),
+        pivot: PosType = (0.0, 0.0),
         rotation: float = 0.0,
         zoom: float = 1.0,
         slowness: float = 1.0,
@@ -93,6 +94,7 @@ class Camera2D(ServiceUnit, ICamera2D):
         self.dead_zone_height = 0.0
 
         self._zoom = max(0.0, zoom)
+        # pyrefly: ignore[bad-assignment]
         self._camera = None
         self._offset = (0.0, 0.0)
         self._window_size = size
@@ -159,6 +161,8 @@ class Camera2D(ServiceUnit, ICamera2D):
         """
         if window_width and window_height:
             self._window_size = (window_width, window_height)
+
+        self._camera = pr.Camera2D()
         self._recalc_zoom_and_viewport()
 
     def _recalc_zoom_and_viewport(self) -> None:
@@ -181,18 +185,10 @@ class Camera2D(ServiceUnit, ICamera2D):
             viewport_y + viewport_height / 2,
         )
         total_zoom = base_zoom * self._zoom
-        if self._camera is None:
-            self._camera = pr.Camera2D(
-                pr.Vector2(self._offset[0], self._offset[1]),
-                pr.Vector2(self.pos[0], self.pos[1]),
-                self.rotation,
-                total_zoom,
-            )
-        else:
-            self._camera.offset = pr.Vector2(self._offset[0], self._offset[1])
-            self._camera.target = pr.Vector2(self.pos[0], self.pos[1])
-            self._camera.zoom = total_zoom
-            self._camera.rotation = self.rotation
+        self._camera.offset = pr.Vector2(self._offset[0], self._offset[1])
+        self._camera.target = pr.Vector2(self.pos[0], self.pos[1])
+        self._camera.zoom = total_zoom
+        self._camera.rotation = self.rotation
 
     def calculate_zoom(self) -> float:
         """Return the final zoom value used by the camera.

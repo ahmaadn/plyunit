@@ -16,9 +16,9 @@ def mock_assets():
 
     # Mock regions
     # "grass", "water", "tree"
-    t1 = TextureData(parent_id="terrain", texture=MagicMock(), source_rect=(0, 0, 16, 16))
-    t2 = TextureData(parent_id="terrain", texture=MagicMock(), source_rect=(16, 0, 16, 16))
-    t3 = TextureData(parent_id="terrain", texture=MagicMock(), source_rect=(32, 0, 16, 16))
+    t1 = TextureData(id="grass", parent_id="terrain", texture=MagicMock(), source_rect=(0, 0, 16, 16))
+    t2 = TextureData(id="water", parent_id="terrain", texture=MagicMock(), source_rect=(16, 0, 16, 16))
+    t3 = TextureData(id="tree", parent_id="terrain", texture=MagicMock(), source_rect=(32, 0, 16, 16))
 
     assets._regions = {
         "grass": t1,
