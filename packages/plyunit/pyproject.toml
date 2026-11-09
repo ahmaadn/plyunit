@@ -52,7 +52,7 @@ branch = false
 source = ["src/plyunit"]
 omit = [
   "*/backends/ports/*",
-  "*/backends/imgui/raylib/backend.py",
+  "*/backends/imgui/raylib_integration.py",
   "*/backends/physics/pymunk/debug_draw.py",
 
   "*/examples/*",

@@ -13,12 +13,14 @@ from .handler import (
     Texture2DHandle,
     TextureTarget,
 )
+from .imgui import DrawCallback, ImGuiPort
 from .input import IGamepad, IInput, IMouse, ITouch
 from .renderer import ICanvas2D, IRenderPass, IUnifiedBufferBatch, IWindow
 from .shaders import IShaders
 from .text import IText, ITextRenderer, ShapedText, TemplateText
 
 __all__ = (
+    "DrawCallback",
     "FontHandle",
     "IAssets",
     "IAudio",
@@ -35,6 +37,7 @@ __all__ = (
     "ITouch",
     "IUnifiedBufferBatch",
     "IWindow",
+    "ImGuiPort",
     "ImageHandle",
     "PixelBuffer",
     "RenderTextureHandle",

@@ -1,16 +1,27 @@
 from __future__ import annotations
 
+import importlib
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
+
+from plyunit.core.app import App
+from plyunit.core.units.unit_registry import UnitRegistry
+
+
+@pytest.fixture(autouse=True)
+def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> None:
+    unit_module = importlib.import_module("plyunit.core.units.unit")
+    monkeypatch.setattr(unit_module, "units", UnitRegistry())
 
 
 def test_raylib_imgui_backend_setup_shutdown(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("imgui_bundle")
     pytest.importorskip("OpenGL")
 
-    import plyunit.backends.imgui.raylib.backend as backend_mod
-    from plyunit.backends.imgui.raylib.backend import ImGuiBackend
+    import plyunit.backends.imgui.raylib_integration as backend_mod
+    from plyunit.backends.imgui.raylib_integration import ImGui
 
     fake_io = SimpleNamespace(
         backend_flags=0,
@@ -136,6 +147,7 @@ def test_raylib_imgui_backend_setup_shutdown(monkeypatch: pytest.MonkeyPatch) ->
             MOUSE_BUTTON_MIDDLE=2,
         ),
     )
+
     # Expand KEY_MAP safely: any missing attr returns 0
     class _KeyNS:
         def __getattr__(self, name):
@@ -146,35 +158,68 @@ def test_raylib_imgui_backend_setup_shutdown(monkeypatch: pytest.MonkeyPatch) ->
     # KEY_MAP is built at import from real pyray; rebuild empty for unit test
     monkeypatch.setattr(backend_mod, "_KEY_MAP", [])
 
-    b = ImGuiBackend()
-    b.setup(dark_style=True, no_ini=True)
+    b = ImGui(dark_style=True, no_ini=True)
+    app = Mock(spec=App, window=SimpleNamespace(dt=0.016))
+    assert b.context is None
+    assert b.want_capture_mouse() is False
+    assert b.want_capture_keyboard() is False
+    with pytest.raises(RuntimeError, match="attached before frame"):
+        b._begin_frame(0.02)
+    b._render()
+    assert events == []
+
+    b.on_attach(app)
+    b._create_context()
+    assert b.active is True
     assert b.context is fake_ctx
-    assert "create_context" in events
+    assert events.count("create_context") == 1
     assert "prog_init" in events
     assert fake_io.backend_flags != 0
 
-    b.new_frame(0.02)
+    b.frame(0.02)
     assert fake_io.delta_time == 0.02
     assert "new_frame" in events
-
-    b.render()
     assert "render" in events
     assert any(e.startswith("prog_render") for e in events)
+    assert events[-3:] == ["prog_render:True", "tex:0", "flush"]
+    assert events.index("new_frame") < events.index("render")
+    assert fake_io.display_size == (640.0, 360.0)
+    assert fake_io.display_framebuffer_scale == (1.0, 1.0)
+
+    b.frame(0.0)
+    assert fake_io.delta_time == backend_mod._FALLBACK_DELTA_TIME
+    b.frame(-0.01)
+    assert fake_io.delta_time == backend_mod._FALLBACK_DELTA_TIME
+    b.frame()
+    assert fake_io.delta_time == 0.016
 
     assert b.want_capture_mouse() is False
     assert b.want_capture_keyboard() is False
+    fake_io.want_capture_mouse = True
+    fake_io.want_capture_keyboard = True
+    assert b.want_capture_mouse() is True
+    assert b.want_capture_keyboard() is True
 
-    b.shutdown()
-    assert "destroy" in events
+    b.on_detach(app)
+    assert events[-3:] == ["set_ctx", "prog_shutdown", "destroy"]
     assert b.context is None
+    assert b._renderer is None
+    assert b.active is False
+    assert b._app is None
+    events.clear()
+    b.on_detach(app)
+    b.frame()
+    assert events == []
+    assert b.want_capture_mouse() is False
+    assert b.want_capture_keyboard() is False
 
 
 def test_raylib_imgui_backend_light_style(monkeypatch: pytest.MonkeyPatch) -> None:
     pytest.importorskip("imgui_bundle")
     pytest.importorskip("OpenGL")
 
-    import plyunit.backends.imgui.raylib.backend as backend_mod
-    from plyunit.backends.imgui.raylib.backend import ImGuiBackend
+    import plyunit.backends.imgui.raylib_integration as backend_mod
+    from plyunit.backends.imgui.raylib_integration import ImGui
 
     styles: list[str] = []
     fake_io = SimpleNamespace(
@@ -270,7 +315,8 @@ def test_raylib_imgui_backend_light_style(monkeypatch: pytest.MonkeyPatch) -> No
     )
     monkeypatch.setattr(backend_mod, "_KEY_MAP", [])
 
-    b = ImGuiBackend()
-    b.setup(dark_style=False, no_ini=False)
+    b = ImGui(dark_style=False, no_ini=False)
+    app = Mock(spec=App)
+    b.on_attach(app)
     assert styles == ["light"]
-    b.shutdown()
+    b.on_detach(app)

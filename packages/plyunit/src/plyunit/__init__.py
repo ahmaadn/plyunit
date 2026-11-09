@@ -27,11 +27,7 @@ if TYPE_CHECKING:
         TextureWrap as TextureWrap,
     )
     from plyunit.backends import ports as ports
-    from plyunit.backends.imgui import (
-        ImGui as ImGui,
-        ImGuiBackend as ImGuiBackend,
-        build_imgui_service as build_imgui_service,
-    )
+    from plyunit.backends.imgui import ImGui as ImGui
     from plyunit.backends.integrations import (
         Assets as Assets,
         Audio as Audio,
@@ -275,8 +271,6 @@ _LAZY_MODULES = {
     "build_physics_service": "plyunit.backends.physics",
     # ImGui backend
     "ImGui": "plyunit.backends.imgui",
-    "ImGuiBackend": "plyunit.backends.imgui",
-    "build_imgui_service": "plyunit.backends.imgui",
 }
 
 
@@ -372,7 +366,6 @@ __all__ = (
     "Gamepad",
     "IAudio",
     "ImGui",
-    "ImGuiBackend",
     "ImGuiConfig",
     "ImageHandle",
     "ImageProcessor",
@@ -431,7 +424,6 @@ __all__ = (
     "VoiceId",
     "WaitToken",
     "Window",
-    "build_imgui_service",
     "build_physics_service",
     "builtin",
     "components",

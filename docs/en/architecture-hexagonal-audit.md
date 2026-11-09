@@ -44,7 +44,7 @@ Concrete input, assets, audio, text, and shader services live under
 | Input | `Input`, `Mouse`, `Gamepad`, `Touch` | `IInput`, `IMouse`, `IGamepad`, `ITouch` | separate raylib device adapters |
 | Audio | `Audio` | `IAudio` | raylib audio service |
 | Physics | `Physics`, body/area/shape APIs | `PhysicsBackend` adapter boundary | pymunk |
-| ImGui | `ImGui` | `ImGuiBackend` | imgui-bundle/raylib backend |
+| ImGui | `ImGui` | `ImGuiPort` | `backends/imgui/raylib_integration.py` |
 
 Tilemap rendering no longer uses `IRenderTargetOps` or a tilemap renderer
 facade. `TileMapNode` uses the configured `Renderer.canvas` for render-target

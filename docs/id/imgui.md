@@ -24,7 +24,8 @@ app = pu.init(
 app.run()
 ```
 
-Bootstrap memanggil `build_imgui_service` → registry retention → backend setup.
+Bootstrap membuat `ImGui` → registry retention → setup context dan renderer.
+Service mengimplementasikan `plyunit.backends.ports.imgui.ImGuiPort` secara struktural.
 
 ## 2. Draw callbacks
 
@@ -75,7 +76,8 @@ ImGui **bukan** bagian scene tree / render queue.
 | `clear_draw()` | Kosongkan |
 | `want_capture_mouse()` | UI makan mouse |
 | `want_capture_keyboard()` | UI makan keyboard |
-| `backend` | `ImGuiBackend` |
+| `active` | Service sudah terpasang dan siap menggambar |
+| `context` | Context ImGui aktif, atau `None` sebelum attach / setelah detach |
 
 ## 4. Game content + ImGui
 

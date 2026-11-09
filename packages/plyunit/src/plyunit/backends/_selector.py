@@ -79,9 +79,9 @@ def imgui_module() -> str:
     """Return the ImGui backend module path (follows the integration backend)."""
     # ImGui and integration share the same host (e.g. raylib).
     integ = integration_module()
-    # "plyunit.backends.integrations.raylib" -> "plyunit.backends.imgui.raylib"
+    # "plyunit.backends.integrations.raylib" -> "plyunit.backends.imgui.raylib_integration" # noqa: E501
     head, _, tail = integ.rpartition("integrations.")
-    return f"{head}imgui.{tail}"
+    return f"{head}imgui.{tail}_integration"
 
 
 __all__ = [

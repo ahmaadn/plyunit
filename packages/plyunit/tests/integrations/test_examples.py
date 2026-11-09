@@ -255,11 +255,10 @@ def example_backend(monkeypatch):
     factories["UnifiedBufferBatch"] = Batch
     monkeypatch.setattr(bootstrap, "_load_backend_bindings", lambda: factories)
     if importlib.util.find_spec("imgui_bundle") is not None:
-        from plyunit.backends.imgui.raylib.service import ImGui
-        from plyunit.backends.imgui.raylib.backend import ImGuiBackend
+        from plyunit.backends.imgui.raylib_integration import ImGui
 
-        monkeypatch.setattr(ImGuiBackend, "setup", lambda *args, **kwargs: None)
-        monkeypatch.setattr(ImGuiBackend, "shutdown", lambda *args: None)
+        monkeypatch.setattr(ImGui, "_create_context", lambda *args: None)
+        monkeypatch.setattr(ImGui, "_destroy_context", lambda *args: None)
         monkeypatch.setattr(ImGui, "frame", lambda *args: None)
     return fake
 
