@@ -3,6 +3,7 @@
 import math
 
 import plyunit as pu
+from plyunit.backends.ports.renderer import ICanvas2D, IWindow
 
 
 class GlowOrb(pu.NodeUnit):
@@ -12,14 +13,18 @@ class GlowOrb(pu.NodeUnit):
         self.radius = radius
         self.time = 0.0
 
+    def on_ready(self) -> None:
+        """Resolve the shared circle after its GPU resource has been created."""
+        self._texture = self.one("@Assets").get_asset("blend_circle")
+
     def update(self, dt: float) -> None:
         self.time += dt
 
-    def render_submit(self, renderer: pu.Renderer) -> None:
+    def render_submit(self, renderer: pu.Renderer, context=None) -> None:
         wt = self.world_transform_lerp()
         x, y = wt.position
 
-        # Outer glow (lebih besar, lebih transparan)
+        # Outer glow is larger and more transparent.
         pulse = 0.8 + math.sin(self.time * 3.0) * 0.2
         glow_color = (
             self.color[0],
@@ -28,34 +33,40 @@ class GlowOrb(pu.NodeUnit):
             int(80 * pulse),
         )
 
-        renderer.render_circle(
+        glow_radius = self.radius * 2.0 * pulse
+        renderer.render_sprite(
             z=0,
             layer=pu.Layer.EFFECTS,
-            center=(x, y),
-            radius=self.radius * 2.0 * pulse,
-            color=glow_color,
+            texture=self._texture,
+            dest=(x, y, glow_radius * 2.0, glow_radius * 2.0),
+            origin=(glow_radius, glow_radius),
+            tint=glow_color,
             blend_mode=pu.BlendMode.ADDITIVE,
             scissor=self._resolved_scissor,
         )
 
         # Inner core
-        renderer.render_circle(
+        core_radius = self.radius * pulse
+        renderer.render_sprite(
             z=1,
             layer=pu.Layer.EFFECTS,
-            center=(x, y),
-            radius=self.radius * pulse,
-            color=self.color,
+            texture=self._texture,
+            dest=(x, y, core_radius * 2.0, core_radius * 2.0),
+            origin=(core_radius, core_radius),
+            tint=self.color,
             blend_mode=pu.BlendMode.ADDITIVE,
             scissor=self._resolved_scissor,
         )
 
         # Center bright spot
-        renderer.render_circle(
+        spot_radius = self.radius * 0.3
+        renderer.render_sprite(
             z=2,
             layer=pu.Layer.EFFECTS,
-            center=(x, y),
-            radius=self.radius * 0.3,
-            color=(255, 255, 255, 200),
+            texture=self._texture,
+            dest=(x, y, spot_radius * 2.0, spot_radius * 2.0),
+            origin=(spot_radius, spot_radius),
+            tint=(255, 255, 255, 200),
             blend_mode=pu.BlendMode.ADDITIVE,
             scissor=self._resolved_scissor,
         )
@@ -66,23 +77,28 @@ class ShadowOverlay(pu.NodeUnit):
         super().__init__(name="ShadowOverlay")
         self.time = 0.0
 
+    def on_ready(self) -> None:
+        """Resolve the shared circle owned by Assets."""
+        self._texture = self.one("@Assets").get_asset("blend_circle")
+
     def update(self, dt: float) -> None:
         self.time += dt
 
-    def render_submit(self, renderer: pu.Renderer) -> None:
+    def render_submit(self, renderer: pu.Renderer, context=None) -> None:
         wt = self.world_transform_lerp()
         x, y = wt.position
 
-        # Shadow bergerak
+        # Moving shadow
         ox = math.sin(self.time * 1.5) * 40.0
         oy = math.cos(self.time * 1.0) * 20.0
 
-        renderer.render_circle(
+        renderer.render_sprite(
             z=0,
             layer=pu.Layer.EFFECTS,
-            center=(x + ox, y + oy),
-            radius=50.0,
-            color=(100, 100, 120, 180),
+            texture=self._texture,
+            dest=(x + ox, y + oy, 100.0, 100.0),
+            origin=(50.0, 50.0),
+            tint=(100, 100, 120, 180),
             blend_mode=pu.BlendMode.MULTIPLIED,
             scissor=self._resolved_scissor,
         )
@@ -97,13 +113,13 @@ class NormalRect(pu.NodeUnit):
     def update(self, dt: float) -> None:
         self.time += dt
 
-    def draw(self, canvas: pu.interfaces.ICanvas2D) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         wt = self.world_transform_lerp()
         x, y = wt.position
 
         ox = math.sin(self.time * 2.0) * 30.0
 
-        # Kotak semi-transparan
+        # Translucent rectangle
         canvas.draw_rectangle(
             rect=(x + ox - 25, y - 25, 50, 50),
             color=self.color,
@@ -126,7 +142,7 @@ class BlendPanel(pu.NodeUnit):
         self.height = height
         self.bg_color = bg_color
 
-    def draw(self, canvas: pu.interfaces.ICanvas2D) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         wt = self.world_transform_lerp()
         x, y = wt.position
 
@@ -197,7 +213,7 @@ class MainScene(pu.SceneUnit):
         self.root.attach(p3)
         p3.transform.set_position(425, 70)
 
-        # Beberapa kotak cerah sebagai "lantai"
+        # Bright rectangles form the floor beneath the shadows.
         for i in range(4):
             for j in range(4):
                 bright = NormalRect((180 + i * 15, 160 + j * 15, 140, 255))
@@ -217,9 +233,13 @@ class MainScene(pu.SceneUnit):
 class BlendModeApp(pu.App):
     scene_manager: pu.SceneManager
     renderer: pu.Renderer
-    window: pu.Window
+    window: IWindow
 
     def on_load(self) -> None:
+        self.assets.store_texture(
+            "blend_circle",
+            self.renderer.canvas.create_circle(radius=50.0, color=(255, 255, 255, 255)),
+        )
         self.scene_manager.push(MainScene())
         self.text = pu.Text()
 

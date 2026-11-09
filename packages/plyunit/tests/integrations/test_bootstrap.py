@@ -1,162 +1,149 @@
+"""Tests for composition using selected backend factories and neutral ports."""
+
 from __future__ import annotations
 
 import sys
 from types import ModuleType, SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
-import plyunit._bootstrap as bootstrap_mod
+import plyunit._bootstrap as bootstrap
 from plyunit.core.app import App, AppConfig, AudioConfig, ImGuiConfig, PhysicsConfig
 from plyunit.core.units.service_unit import ServiceUnit
 
 
-def _patch_rendering_stack(monkeypatch: pytest.MonkeyPatch, *, fake_window=None, fake_canvas=None):
-    """Stub window/canvas/batching factories used by init."""
-    if fake_window is None:
-        fake_window = SimpleNamespace(
-            init_window=lambda *a: None,
-            set_target_fps=lambda *a: None,
-        )
-    if fake_canvas is None:
-        fake_canvas = object()
-
-    fake_batching = SimpleNamespace(
+@pytest.fixture
+def bindings(monkeypatch):
+    window, canvas = Mock(), object()
+    batch = SimpleNamespace(
         capacity=16384,
-        init=lambda *a, **k: None,
+        init=lambda *args, **kwargs: None,
         shutdown=lambda: None,
-        submit_frame=lambda **k: None,
+        submit_frame=lambda **kwargs: None,
     )
+    factories = {
+        "Window": Mock(return_value=window),
+        "Canvas2D": Mock(return_value=canvas),
+        "UnifiedBufferBatch": Mock(return_value=batch),
+        "Assets": Mock(return_value=SimpleNamespace()),
+        "Camera2D": Mock(return_value=SimpleNamespace()),
+        "Audio": Mock(),
+    }
+    monkeypatch.setattr(bootstrap, "_load_backend_bindings", lambda: factories)
+    return factories
 
+
+class ConfigOnlyApp(App):
+    def init(self, config):
+        self.config = config
+
+
+def test_init_default(bindings, monkeypatch) -> None:
+    renderer, scene, animations = object(), object(), object()
+    renderer_factory = Mock(return_value=renderer)
+    monkeypatch.setattr("plyunit.rendering.renderer.Renderer", renderer_factory)
+    monkeypatch.setattr("plyunit.services.scene_manager.SceneManager", lambda: scene)
     monkeypatch.setattr(
-        "plyunit.backends.integrations.raylib.core.get_window",
-        lambda: fake_window,
+        "plyunit.services.animations.Animations", lambda **kwargs: animations
     )
-    monkeypatch.setattr(
-        "plyunit.backends.integrations.raylib.drawing.get_canvas",
-        lambda: fake_canvas,
+    app = ConfigOnlyApp()
+    config = AppConfig(title="test", window_width=100, window_height=80)
+
+    assert bootstrap.init(app, config) is app
+    assert app.window is bindings["Window"].return_value
+    assert app.canvas is bindings["Canvas2D"].return_value
+    assert app.renderer is renderer
+    assert app.assets is bindings["Assets"].return_value
+    assert app.animations is animations
+    assert app.scene_manager is scene
+    bindings["Assets"].assert_called_once_with(asset_base_path=config.assets_path)
+    bindings["Camera2D"].assert_called_once_with(size=(100, 80))
+    renderer_factory.assert_called_once_with(
+        canvas=app.canvas,
+        ubr=bindings["UnifiedBufferBatch"].return_value,
+        max_sprites=config.max_sprites,
     )
-    monkeypatch.setattr(
-        "plyunit.backends.integrations.raylib.drawing.get_batching_backend",
-        lambda: fake_batching,
+    bindings["Audio"].from_config.assert_not_called()
+
+
+def test_service_overrides_receive_app_and_none_disables(bindings, monkeypatch) -> None:
+    monkeypatch.setattr("plyunit.rendering.renderer.Renderer", lambda **kwargs: object())
+    custom_assets = object()
+    factory = Mock(return_value=custom_assets)
+    app = ConfigOnlyApp()
+    bootstrap.init(
+        app, asset=factory, animations=None, scene_manager=None, camera=None
     )
-    return fake_window, fake_canvas
+    factory.assert_called_once_with(app)
+    assert app.assets is custom_assets
+    assert app.animations is None
+    assert app.scene_manager is None
+    assert app.camera is None
+    bindings["Assets"].assert_not_called()
+    bindings["Camera2D"].assert_not_called()
 
 
-def test_init_default(monkeypatch: pytest.MonkeyPatch):
-    fake_window, fake_canvas = _patch_rendering_stack(monkeypatch)
-    fake_renderer = SimpleNamespace()
-    fake_scene = SimpleNamespace()
-    fake_assets = SimpleNamespace()
-    fake_anims = SimpleNamespace()
-
-    monkeypatch.setattr(
-        "plyunit.rendering.renderer.Renderer",
-        lambda canvas, **kwargs: fake_renderer,
-    )
-    monkeypatch.setattr(
-        "plyunit.services.scene_manager.SceneManager", lambda: fake_scene
-    )
-    monkeypatch.setattr(
-        "plyunit.assets.assets.Assets", lambda **kwargs: fake_assets
-    )
-    monkeypatch.setattr(
-        "plyunit.assets.animations.Animations", lambda **kwargs: fake_anims
-    )
-    monkeypatch.setattr(
-        "plyunit.backends.integrations.raylib.core.Camera2D",
-        lambda **kwargs: SimpleNamespace(),
-    )
-
-    class MiniApp(App):
-        # pyrefly: ignore [bad-override]
-        def init(self, cfg):
-            self.config = cfg
-            self.running = False
-
-    app = MiniApp()
-    out = bootstrap_mod.init(
-        app, AppConfig(title="t", window_width=100, window_height=100)
-    )
-    assert out is app
-    assert app.window is fake_window
-    assert app.canvas is fake_canvas
-    assert app.renderer is fake_renderer
-
-
-def test_bootstrap_physics_and_imgui_flags(monkeypatch: pytest.MonkeyPatch):
-    _patch_rendering_stack(monkeypatch)
-
-    monkeypatch.setattr(
-        "plyunit.rendering.renderer.Renderer",
-        lambda canvas, **kwargs: object(),
-    )
-    monkeypatch.setattr("plyunit.services.scene_manager.SceneManager", lambda: object())
-    monkeypatch.setattr("plyunit.assets.assets.Assets", lambda **kwargs: object())
-    monkeypatch.setattr(
-        "plyunit.assets.animations.Animations", lambda **kwargs: object()
-    )
-    monkeypatch.setattr(
-        "plyunit.backends.integrations.raylib.core.Camera2D",
-        lambda **kwargs: object(),
-    )
-
-    class FakePhysicsBackend(ServiceUnit):
-        def __init__(self, **kwargs) -> None:
-            super().__init__(name="physics_backend")
-            self.cfg = kwargs
-
-    class FakePhysics(ServiceUnit):
-        def __init__(self, backend, world_bounds=None) -> None:
-            super().__init__(name="phys")
-            self.backend = backend
-            self.world_bounds = world_bounds
-
-    fake_phys = ModuleType("plyunit.backends.physics")
-    fake_phys.Physics = FakePhysics
-    fake_phys.PhysicsBackend = FakePhysicsBackend
-    monkeypatch.setitem(sys.modules, "plyunit.backends.physics", fake_phys)
-
-    class FakeImGui(ServiceUnit):
-        def __init__(self, **kwargs) -> None:
-            super().__init__(name="imgui")
-            self.cfg = kwargs
-
+def test_bootstrap_optional_services_use_selected_adapters(bindings, monkeypatch):
+    monkeypatch.setattr("plyunit.rendering.renderer.Renderer", lambda **kwargs: object())
+    fake_physics = ModuleType("plyunit.backends.physics")
+    fake_physics.PhysicsBackend = Mock(return_value=object())
+    fake_physics.Physics = Mock(return_value=object())
+    monkeypatch.setitem(sys.modules, fake_physics.__name__, fake_physics)
     fake_imgui = ModuleType("plyunit.backends.imgui")
-    fake_imgui.ImGui = FakeImGui
-    monkeypatch.setitem(sys.modules, "plyunit.backends.imgui", fake_imgui)
-
-    class MiniApp(App):
-        # pyrefly: ignore [bad-override]
-        def init(self, cfg):
-            self.config = cfg
-
-    fake_audio = ModuleType("plyunit.audio.service")
-
-    class FakeAudio(ServiceUnit):
-        @classmethod
-        def from_config(cls, cfg):
-            service = cls(name="Audio")
-            service.cfg = cfg
-            return service
-
-        def __init__(self, name="Audio") -> None:
-            super().__init__(name=name)
-
-    fake_audio.Audio = FakeAudio  # type: ignore[attr-defined]
-    monkeypatch.setitem(sys.modules, "plyunit.audio.service", fake_audio)
-
-    app = MiniApp()
-    bootstrap_mod.init(
-        app,
-        AppConfig(
-            title="t",
-            window_width=64,
-            window_height=64,
-            physics=PhysicsConfig(enabled=True),
-            imgui=ImGuiConfig(enabled=True),
-            audio=AudioConfig(enabled=True),
-        ),
+    fake_imgui.ImGui = Mock(return_value=object())
+    monkeypatch.setitem(sys.modules, fake_imgui.__name__, fake_imgui)
+    app = ConfigOnlyApp()
+    config = AppConfig(
+        physics=PhysicsConfig(enabled=True),
+        imgui=ImGuiConfig(enabled=True),
+        audio=AudioConfig(enabled=True),
     )
-    assert app.one_or_none("phys", scope="global") is not None
-    assert app.one_or_none("imgui", scope="global") is not None
-    assert app.one_or_none("@Audio", scope="global") is not None
+
+    bootstrap.init(app, config, scene_manager=None, animations=None)
+
+    fake_physics.PhysicsBackend.assert_called_once()
+    fake_physics.Physics.assert_called_once_with(
+        fake_physics.PhysicsBackend.return_value,
+        world_bounds=config.physics.world_bounds,
+    )
+    fake_imgui.ImGui.assert_called_once_with(
+        dark_style=config.imgui.dark_style, no_ini=config.imgui.no_ini
+    )
+    bindings["Audio"].from_config.assert_called_once_with(config.audio)
+
+
+def test_bindings_expose_only_current_backend_factories() -> None:
+    from plyunit.backends.integrations import raylib
+
+    actual = bootstrap._load_backend_bindings()
+    assert set(actual) == {
+        "Window", "Canvas2D", "UnifiedBufferBatch", "Assets", "Camera2D", "Audio"
+    }
+    for name, factory in actual.items():
+        assert factory is getattr(raylib, name)
+
+
+def test_optional_gpu_services_attach_after_window_and_batch_init(bindings, monkeypatch) -> None:
+    """ImGui attaches immediately, so the graphics context must already exist."""
+    events = []
+    window = bindings["Window"].return_value
+    window.init_window.side_effect = lambda *args: events.append("window")
+    bindings["UnifiedBufferBatch"].return_value.init = lambda *args: events.append("batch")
+    monkeypatch.setattr(bootstrap, "_imgui", lambda app, config: events.append("imgui"))
+    app = App()
+    bootstrap.init(app, AppConfig(imgui=ImGuiConfig(enabled=True)),
+        asset=None, scene_manager=None, animations=None, camera=None)
+    assert events == ["window", "batch", "imgui"]
+    app.shutdown()
+
+
+def test_default_resolution_and_factory_are_distinct() -> None:
+    app = ConfigOnlyApp()
+    default = Mock(return_value="default")
+    assert bootstrap._service(app, bootstrap.DEFAULT, default) == "default"
+    assert bootstrap._service(app, None, default) is None
+    override = Mock(return_value="custom")
+    assert bootstrap._service(app, override, default) == "custom"
+    override.assert_called_once_with(app)
+    default.assert_called_once()

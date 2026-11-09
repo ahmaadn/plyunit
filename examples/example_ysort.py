@@ -1,14 +1,8 @@
-"""Example: Y-Sort Top-Down
+"""Demonstrate Y-sorting in a top-down scene.
 
-Demonstrasi Y-sort untuk game top-down RPG.
-Objek yang lebih dekat ke bawah layar digambar di atas objek yang lebih jauh.
-
-- Pohon-pohon statis dengan Y-sort
-- Karakter yang bisa bergerak, otomatis tersort berdasarkan posisi Y
-- Layer ENTITIES ditandai sebagai Y-sort layer
-
-Kontrol:
-- WASD: gerakkan karakter
+Objects nearer the bottom of the screen appear in front of objects above them.
+Static trees and moving characters share the Y-sorted ``ENTITIES`` layer.
+Use WASD to move the player.
 """
 
 import math
@@ -16,10 +10,11 @@ import math
 import pyray as pr
 
 import plyunit as pu
+from plyunit.backends.ports.renderer import ICanvas2D
 
 
 class Tree(pu.NodeUnit):
-    """Pohon statis — di-sort berdasarkan posisi Y (kaki pohon)."""
+    """Draw a static tree, sorted by the Y coordinate at its base."""
 
     def __init__(
         self, color: tuple[int, int, int, int], trunk_height: float = 60.0
@@ -30,11 +25,11 @@ class Tree(pu.NodeUnit):
         self.y_sort_enabled = True
         self.layer = pu.Layer.ENTITIES
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         wt = self.world_transform_lerp()
         x, y = wt.position
 
-        # Bayangan
+        # Shadow
         canvas.draw_ellipse(
             center=(x, y + 5),
             radius_h=20.0,
@@ -42,7 +37,7 @@ class Tree(pu.NodeUnit):
             color=(0, 0, 0, 60),
         )
 
-        # Batang
+        # Trunk
         trunk_color = (
             max(0, self.color[0] - 100),
             max(0, self.color[1] - 60),
@@ -54,7 +49,7 @@ class Tree(pu.NodeUnit):
             color=trunk_color,
         )
 
-        # Daun (lingkaran-lingkaran)
+        # Foliage
         leaf_y = y - self.trunk_height
         canvas.draw_circle(center=(x, leaf_y - 10), radius=22.0, color=self.color)
         canvas.draw_circle(
@@ -80,7 +75,7 @@ class Tree(pu.NodeUnit):
 
 
 class Character(pu.NodeUnit):
-    """Karakter yang bisa digerakkan — Y-sort berdasarkan posisi kaki."""
+    """Draw a moving character, sorted by the Y coordinate at its feet."""
 
     def __init__(
         self,
@@ -113,7 +108,7 @@ class Character(pu.NodeUnit):
                     cy + dy * self.speed * dt,
                 )
         else:
-            # NPC: gerakan idle
+            # Idle movement for NPCs
             cx, cy = self.transform.local.position
             base_y = getattr(self, "_base_y", cy)
             if not hasattr(self, "_base_y"):
@@ -122,11 +117,11 @@ class Character(pu.NodeUnit):
             new_y = base_y + math.sin(self.time * 0.8) * 30.0
             self.transform.set_position(cx, new_y)
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         wt = self.world_transform_lerp()
         x, y = wt.position
 
-        # Bayangan
+        # Shadow
         canvas.draw_ellipse(
             center=(x, y + 2),
             radius_h=14.0,
@@ -134,7 +129,7 @@ class Character(pu.NodeUnit):
             color=(0, 0, 0, 60),
         )
 
-        # Badan
+        # Body
         canvas.draw_rectangle(
             rect=(x - 10, y - 30, 20, 30),
             color=self.body_color,
@@ -142,7 +137,7 @@ class Character(pu.NodeUnit):
             segments=6,
         )
 
-        # Kepala
+        # Head
         head_color = (
             min(255, self.body_color[0] + 40),
             min(255, self.body_color[1] + 40),
@@ -162,13 +157,13 @@ class Character(pu.NodeUnit):
 
 
 class Ground(pu.NodeUnit):
-    """Grid lantai untuk referensi visual."""
+    """Draw a ground grid for visual reference."""
 
     def __init__(self) -> None:
         super().__init__(name="Ground")
         self.layer = pu.Layer.BACKGROUND
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         # Grid
         for gx in range(0, 640, 40):
             canvas.draw_line(
@@ -187,7 +182,7 @@ class Ground(pu.NodeUnit):
 
 
 class YSortInfo(pu.NodeUnit):
-    """UI overlay menampilkan info Y-sort."""
+    """Display the current Y-sort order in a screen-space overlay."""
 
     def __init__(self, player: Character, entities: list[pu.NodeUnit]) -> None:
         super().__init__(name="YSortInfo")
@@ -195,7 +190,7 @@ class YSortInfo(pu.NodeUnit):
         self.entity_refs = entities
         self.layer = pu.Layer.UI
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         canvas.draw_text(
             text="WASD: move player | Entities Y-sorted automatically",
             pos=(10, 10),
@@ -203,7 +198,7 @@ class YSortInfo(pu.NodeUnit):
             color=(180, 180, 180, 255),
         )
 
-        # Tampilkan urutan Y-sort
+        # Display the Y-sort order.
         sorted_entities = sorted(
             self.entity_refs,
             key=lambda e: e.transform.world.position[1],
@@ -239,7 +234,7 @@ class MainScene(pu.SceneUnit):
         super().__init__("Main", tags={"main"})
 
     def on_load(self) -> None:
-        # Tandai layer ENTITIES sebagai Y-sort layer
+        # Enable Y-sorting for the entities layer.
         pu.Renderer.enable_y_sort_layer(pu.Layer.ENTITIES)
 
         # Ground
@@ -248,7 +243,7 @@ class MainScene(pu.SceneUnit):
 
         entities: list[pu.NodeUnit] = []
 
-        # Pohon-pohon
+        # Trees
         tree_data = [
             ((60, 200, 60, 255), (150, 200)),
             ((40, 180, 40, 255), (350, 150)),
@@ -302,7 +297,7 @@ class YSortApp(pu.App):
         _ = dt
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((245, 245, 245, 255))
+        self.window.clear_background((25, 30, 25, 255))
         self.scene_manager.render(self.renderer)
         self.renderer.flush_all()
         self.window.end_drawing()
@@ -315,7 +310,6 @@ def main():
             title="Y-Sort Top-Down Example",
             window_width=640,
             window_height=500,
-            background_color=pr.Color(25, 30, 25, 255),
         ),
     )
     app.run()

@@ -16,15 +16,7 @@ from warnings import deprecated
 import numpy as np
 
 from plyunit._constants import MAX_SPRITES
-from plyunit.core.types import (
-    ColorType,
-    PrColor,
-    RectType,
-    RenderTexture,
-    ShaderType,
-    Texture,
-    Vec2Type,
-)
+from plyunit.core.types import ColorType, RectType, Vec2Type
 from plyunit.core.units.service_unit import ServiceUnit
 from plyunit.rendering.draw_primitive import draw_primitive
 from plyunit.utils.math import aabb_intersection
@@ -50,8 +42,20 @@ from .render_state import (
 )
 
 if TYPE_CHECKING:
-    from plyunit.backends.interfaces import ICamera2D
-    from plyunit.backends.interfaces.i_renderer import ICanvas2D, IUnifiedBufferBatch
+    from plyunit.backends.ports.camera2d import ICamera2D
+    from plyunit.backends.ports.handler import (
+        FontHandle,
+        RenderTextureHandle,
+        ShaderHandle,
+        Texture2DHandle,
+    )
+    from plyunit.backends.ports.renderer import (
+        FrameArray,
+        ICanvas2D,
+        IUnifiedBufferBatch,
+    )
+    from plyunit.backends.ports.text import ShapedText
+    from plyunit.core.components.transform import Transform2D
 
 __all__ = [
     "_Y_SORT_LAYERS",
@@ -64,18 +68,26 @@ __all__ = [
 
 
 def _xy(value: Vec2Type) -> tuple[float, float]:
-    """Converts a vector-like to an ``(x, y)`` float tuple."""
-    if hasattr(value, "x") and hasattr(value, "y"):
-        return float(value.x), float(value.y)
-    # pyrefly: ignore [unnecessary-type-conversion]
+    """Convert a position tuple to floating-point coordinates.
+
+    Args:
+        value: Position ``(x, y)``.
+
+    Returns:
+        Floating-point position components.
+    """
     return float(value[0]), float(value[1])
 
 
 def _rgba(tint: ColorType) -> tuple[int, int, int, int]:
-    """Converts a color-like to an ``(r, g, b, a)`` int tuple."""
-    if hasattr(tint, "r"):
-        return int(tint.r), int(tint.g), int(tint.b), int(tint.a)
+    """Convert an RGBA tuple to integer color components.
 
+    Args:
+        tint: Red, green, blue, and alpha components.
+
+    Returns:
+        Integer RGBA components for the frame buffer.
+    """
     return int(tint[0]), int(tint[1]), int(tint[2]), int(tint[3])
 
 
@@ -110,9 +122,9 @@ class Renderer(ServiceUnit):
         """Initializes the renderer with a canvas + UBR.
 
         Args:
-            canvas: :class:`~plyunit.backends.interfaces.ICanvas2D` implementation.
-            ubr: :class:`~plyunit.backends.interfaces.IUnifiedBufferBatch`
-                from the composition root.
+            canvas: Immediate drawing surface implementing ``ICanvas2D``.
+            ubr: Native sprite batch implementing ``IUnifiedBufferBatch``,
+                injected by the composition root.
             frame_buffer: SoA frame buffer; created new when ``None``.
             max_sprites: FrameBuffer / UBR capacity.
 
@@ -124,9 +136,8 @@ class Renderer(ServiceUnit):
         self.state_cache = RenderStateCache()
         if ubr is None:
             raise RuntimeError(
-                "C-extension UBR wajib di-wire (Renderer(ubr=...)). "
-                "Tidak ada fallback Python. "
-                "Gunakan init atau get_batching_backend()."
+                "Renderer requires an IUnifiedBufferBatch adapter "
+                "(Renderer(ubr=...)); native sprite rendering has no Python fallback."
             )
         self._ubr = ubr
         self._frame_buffer = frame_buffer or FrameBuffer(capacity=max_sprites)
@@ -199,7 +210,7 @@ class Renderer(ServiceUnit):
         *,
         scissor: RectType | None = None,
         blend_mode: BlendMode | int = BlendMode.ALPHA,
-        shader: ShaderType | None = None,
+        shader: ShaderHandle | None = None,
     ) -> int:
         """Interns a render state combination and returns its unique id.
 
@@ -224,11 +235,11 @@ class Renderer(ServiceUnit):
         z: float,
         scissor: RectType | None,
         blend_mode: BlendMode | int,
-        shader: ShaderType | None,
+        shader: ShaderHandle | None,
         y_sort: bool,
         y_sort_origin: float,
-        world_transform=None,
-        render_transform=None,
+        world_transform: Transform2D | None = None,
+        render_transform: Transform2D | None = None,
     ) -> RenderContext:
         """Builds a complete ``RenderContext`` for a scene node.
 
@@ -279,7 +290,7 @@ class Renderer(ServiceUnit):
         pass_name: str | None = None,
         scissor: RectType | None = None,
         blend_mode: BlendMode | int = BlendMode.ALPHA,
-        shader: ShaderType | None = None,
+        shader: ShaderHandle | None = None,
         state_id: int | None = None,
         y_sort: bool = False,
         y_sort_origin: float = 0.0,
@@ -355,7 +366,7 @@ class Renderer(ServiceUnit):
     def render_sprite(
         self,
         *,
-        texture: Texture,
+        texture: Texture2DHandle | None,
         z: float = 0.0,
         layer: int = Layer.WORLD,
         pos: Vec2Type = (0.0, 0.0),
@@ -368,7 +379,7 @@ class Renderer(ServiceUnit):
         pass_name: str | None = None,
         scissor: RectType | None = None,
         blend_mode: BlendMode | int = BlendMode.ALPHA,
-        shader: ShaderType | None = None,
+        shader: ShaderHandle | None = None,
         state_id: int | None = None,
         y_sort: bool = False,
         y_sort_origin: float = 0.0,
@@ -380,11 +391,12 @@ class Renderer(ServiceUnit):
         ``ubr_submit_frame``. A ``None`` ``texture`` is ignored.
 
         Args:
-            texture: Source texture; ``None`` is ignored without error.
+            texture: Borrowed texture or region handle; ``None`` is ignored.
             z: Z value for ordering.
             layer: Render layer.
             pos: Sprite position in world space.
-            source: Optional source rect on the texture.
+            source: Absolute source texels on the owning texture. ``None``
+                uses the handle's ``source_rect``, including atlas regions.
             dest: Destination rect; when ``None`` uses ``pos`` + size.
             origin: Pivot point for rotation/scale.
             rotation: Rotation in degrees.
@@ -419,19 +431,16 @@ class Renderer(ServiceUnit):
             )
         sort_key = float(y_sort_origin if use_y_sort else z)
 
-        tw = float(getattr(texture, "width", 1) or 1)
-        th = float(getattr(texture, "height", 1) or 1)
+        tw = float(texture.width) or 1.0
+        th = float(texture.height) or 1.0
+        source = texture.source_rect if source is None else source
         if dest is not None:
             px, py = float(dest[0]), float(dest[1])
             dw, dh = float(dest[2]), float(dest[3])
         else:
             px, py = _xy(pos)
-            if source is not None:
-                dw = abs(float(source[2])) * float(scale)
-                dh = abs(float(source[3])) * float(scale)
-            else:
-                dw = tw * float(scale)
-                dh = th * float(scale)
+            dw = abs(float(source[2])) * float(scale)
+            dh = abs(float(source[3])) * float(scale)
         ox, oy = _xy(origin)
         r, g, b, a = _rgba(tint)
         uv = resolve_uv(source, tw, th)
@@ -442,7 +451,7 @@ class Renderer(ServiceUnit):
             rotation=float(rotation),
             rgba=(r, g, b, a),
             uv=uv,
-            tex_id=int(texture.id),
+            tex_id=self._ubr.texture_id(texture),
             sort_key=sort_key,
             layer=layer_int,
             state_id=int(item_state_id),
@@ -462,8 +471,8 @@ class Renderer(ServiceUnit):
     def render_batch(
         self,
         *,
-        texture: Texture,
-        positions: list[Vec2Type] | Any,
+        texture: Texture2DHandle | None,
+        positions: Sequence[Vec2Type] | FrameArray | None = None,
         z: float = 0.0,
         layer: int = Layer.WORLD,
         source: RectType | None = None,
@@ -474,17 +483,34 @@ class Renderer(ServiceUnit):
         pass_name: str | None = None,
         scissor: RectType | None = None,
         blend_mode: BlendMode | int = BlendMode.ALPHA,
-        shader: ShaderType | None = None,
+        shader: ShaderHandle | None = None,
         state_id: int | None = None,
         y_sort: bool = False,
         y_sort_origin: float = 0.0,
         screen_space: bool | None = None,
-        pos_xy: Any | None = None,
+        pos_xy: FrameArray | None = None,
     ) -> None:
-        """Submits a batch of one sprite (one texture) at many positions.
+        """Submit one texture or region at many positions using bulk SoA writes.
 
-        Sprites are drawn at many positions at once into the
-        FrameBuffer (UBR).
+        Args:
+            texture: Borrowed texture or region handle; ``None`` is ignored.
+            positions: World positions; ignored when ``pos_xy`` is provided.
+            z: Shared depth sort value.
+            layer: Shared render layer.
+            source: Absolute source texels; ``None`` uses ``texture.source_rect``.
+            origin: Shared rotation pivot.
+            rotation: Shared rotation in degrees.
+            scale: Shared size multiplier.
+            tint: Shared RGBA tuple.
+            pass_name: Target pass, or ``None`` for layer-derived routing.
+            scissor: Optional screen-space clip rectangle.
+            blend_mode: Blend mode for the submission.
+            shader: Opaque shader handle passed intact to the canvas.
+            state_id: Previously interned state, if provided.
+            y_sort: Force Y sorting for the batch.
+            y_sort_origin: Shared Y-sort coordinate.
+            screen_space: Override layer-derived screen-space behavior.
+            pos_xy: Contiguous ``(n, 2)`` position array for the fast path.
         """
         if texture is None:
             return
@@ -508,14 +534,11 @@ class Renderer(ServiceUnit):
             )
         sort_key = float(y_sort_origin if use_y_sort else z)
 
-        tw = float(getattr(texture, "width", 1) or 1)
-        th = float(getattr(texture, "height", 1) or 1)
-        if source is not None:
-            dw = abs(float(source[2])) * float(scale)
-            dh = abs(float(source[3])) * float(scale)
-        else:
-            dw = tw * float(scale)
-            dh = th * float(scale)
+        tw = float(texture.width) or 1.0
+        th = float(texture.height) or 1.0
+        source = texture.source_rect if source is None else source
+        dw = abs(float(source[2])) * float(scale)
+        dh = abs(float(source[3])) * float(scale)
         ox, oy = _xy(origin)
         r, g, b, a = _rgba(tint)
         uv = resolve_uv(source, tw, th)
@@ -523,8 +546,7 @@ class Renderer(ServiceUnit):
         if pos_xy is not None:
             arr = pos_xy
         else:
-            import numpy as np
-
+            assert positions is not None
             n = len(positions)
             arr = np.empty((n, 2), dtype=np.float32)
             for i, p in enumerate(positions):
@@ -537,7 +559,7 @@ class Renderer(ServiceUnit):
             rotation=float(rotation),
             rgba=(r, g, b, a),
             uv=uv,
-            tex_id=int(texture.id),
+            tex_id=self._ubr.texture_id(texture),
             sort_key=sort_key,
             layer=layer_int,
             state_id=int(item_state_id),
@@ -558,8 +580,8 @@ class Renderer(ServiceUnit):
     def render_sprites(
         self,
         *,
-        textures: Sequence[Texture] | Any,
-        positions: Sequence[Vec2Type] | Any | None = None,
+        textures: Sequence[Texture2DHandle | None] | None,
+        positions: Sequence[Vec2Type] | FrameArray | None = None,
         z: float = 0.0,
         layer: int = Layer.WORLD,
         sources: Sequence[RectType | None] | None = None,
@@ -570,12 +592,12 @@ class Renderer(ServiceUnit):
         pass_name: str | None = None,
         scissor: RectType | None = None,
         blend_mode: BlendMode | int = BlendMode.ALPHA,
-        shader: ShaderType | None = None,
+        shader: ShaderHandle | None = None,
         state_id: int | None = None,
         y_sort: bool = False,
         y_sort_origin: float = 0.0,
         screen_space: bool | None = None,
-        pos_xy: Any | None = None,
+        pos_xy: FrameArray | None = None,
     ) -> None:
         """Submits N sprites (N distinct textures) at once to the FrameBuffer (UBR).
 
@@ -592,8 +614,8 @@ class Renderer(ServiceUnit):
                 ``textures`` (shorter length truncates the batch).
             z: Z value for ordering (shared across the whole batch).
             layer: Render layer.
-            sources: Optional sequence of N source rects (atlas /
-                spritesheet regions); ``None`` uses the full texture.
+            sources: Optional absolute source rectangles. Omitted or ``None``
+                entries use each handle's own ``source_rect``.
             origins: Sequence of N pivot points; ``None`` means (0, 0).
             rotations: Sequence of N rotations in degrees; ``None`` means 0.
             scales: Sequence of N scale factors; ``None`` means 1.
@@ -636,22 +658,20 @@ class Renderer(ServiceUnit):
         rgba = np.empty((n, 4), dtype=np.uint8)
         keep = np.ones(n, dtype=np.bool_)
 
+        texture_id = self._ubr.texture_id
         for i in range(n):
             texture = textures[i]
             if texture is None:
                 keep[i] = False
                 continue
-            tw = float(getattr(texture, "width", 1) or 1)
-            th = float(getattr(texture, "height", 1) or 1)
-            tex_ids[i] = int(texture.id)
+            tw = float(texture.width) or 1.0
+            th = float(texture.height) or 1.0
+            tex_ids[i] = texture_id(texture)
             source = sources[i] if sources is not None else None
-            if source is not None:
-                uvs[i] = resolve_uv(source, tw, th)
-                sw = abs(float(source[2]))
-                sh = abs(float(source[3]))
-            else:
-                uvs[i] = (0.0, 0.0, 1.0, 1.0)
-                sw, sh = tw, th
+            source = texture.source_rect if source is None else source
+            uvs[i] = resolve_uv(source, tw, th)
+            sw = abs(float(source[2]))
+            sh = abs(float(source[3]))
             scale = float(scales[i]) if scales is not None else 1.0
             sizes[i, 0] = sw * scale
             sizes[i, 1] = sh * scale
@@ -743,37 +763,88 @@ class Renderer(ServiceUnit):
                 self.frame_profile.get("sprite_batch_count", 0.0) + 1.0
             )
 
-    @deprecated("Gunakan render_shaped_text")
     def render_text(
         self,
         *,
+        text: str = "",
+        pos: Vec2Type = (0.0, 0.0),
+        font_size: float = 20.0,
+        color: ColorType | None = None,
+        font: FontHandle | None = None,
+        spacing: float | None = None,
+        origin: Vec2Type | None = None,
+        rotation: float = 0.0,
+        codepoint: int | None = None,
+        codepoints: Sequence[int] | None = None,
         z: float = 0.0,
         layer: int = Layer.UI,
         pass_name: str | None = None,
-        **kwargs: Any,
+        scissor: RectType | None = None,
+        blend_mode: BlendMode | int = BlendMode.ALPHA,
+        shader: ShaderHandle | None = None,
+        state_id: int | None = None,
+        y_sort: bool = False,
+        y_sort_origin: float = 0.0,
+        screen_space: bool | None = None,
     ) -> None:
-        """Submits a text item to the render queue (legacy non-UBR path).
+        """Queue text for the canvas using an opaque font handle.
+
+        Use ``render_shaped_text`` to submit precomputed glyph quads through
+        the native sprite batch. This method preserves canvas text features
+        without inspecting or unwrapping the font in the neutral renderer.
 
         Args:
-            z: Z value for ordering.
-            layer: Render layer (default ``Layer.UI``).
-            pass_name: Target pass name.
-            **kwargs: Text-specific arguments (``text``, ``font``,
-                ``position``, ``size``, ``color``, and state).
+            text: Text to draw.
+            pos: World or screen-space text position.
+            font_size: Requested font size in pixels.
+            color: RGBA tuple, or ``None`` for the canvas default.
+            font: Borrowed font handle, or ``None`` for the canvas default.
+            spacing: Extra glyph spacing, or ``None`` for the canvas default.
+            origin: Optional rotation pivot relative to the text position.
+            rotation: Text rotation in degrees.
+            codepoint: Optional single codepoint overriding ``text``.
+            codepoints: Optional codepoint sequence overriding ``text``.
+            z: Depth sort value.
+            layer: Render layer.
+            pass_name: Target pass, or ``None`` for layer-derived routing.
+            scissor: Optional screen-space clip rectangle.
+            blend_mode: Blend mode for the submission.
+            shader: Opaque shader handle passed intact to the canvas.
+            state_id: Previously interned state, if provided.
+            y_sort: Force Y sorting for this item.
+            y_sort_origin: Y-sort reference coordinate.
+            screen_space: Override layer-derived screen-space behavior.
         """
-        state = self._extract_state(kwargs)
+        payload = TextItem({
+            "text": text,
+            "pos": pos,
+            "font_size": font_size,
+            "color": color,
+            "font": font,
+            "spacing": spacing,
+            "origin": origin,
+            "rotation": rotation,
+            "codepoint": codepoint,
+            "codepoints": codepoints,
+        })
         self._queue_item(
             kind=RenderKind.TEXT,
-            payload=TextItem(kwargs),
+            payload=payload,
             z=z,
             layer=layer,
             pass_name=pass_name,
-            **state,
+            scissor=scissor,
+            blend_mode=blend_mode,
+            shader=shader,
+            state_id=state_id,
+            y_sort=y_sort,
+            y_sort_origin=y_sort_origin,
+            screen_space=screen_space,
         )
 
     def render_shaped_text(
         self,
-        shaped: Any,
+        shaped: ShapedText,
         *,
         pos: Vec2Type,
         color: ColorType = (255, 255, 255, 255),
@@ -784,16 +855,30 @@ class Renderer(ServiceUnit):
         pass_name: str | None = None,
         scissor: RectType | None = None,
         blend_mode: BlendMode | int = BlendMode.ALPHA,
-        shader: ShaderType | None = None,
+        shader: ShaderHandle | None = None,
         state_id: int | None = None,
         screen_space: bool | None = None,
     ) -> None:
-        """Submits glyph quads from a ShapedText to the FrameBuffer SoA
-        (same path as sprites).
+        """Submit shaped glyph quads through the native sprite batch.
 
-        Not a special case: each glyph = one SoA row. ``tex_id`` =
-        ``font.texture.id``; the UBR sort groups the same font into one run.
-        Hot path is numpy vector ops only — no per-glyph Python loop.
+        The batch adapter resolves the borrowed font-atlas handle once per
+        submission. Positions and glyph quads remain vectorized; no per-glyph
+        backend resource inspection occurs.
+
+        Args:
+            shaped: Cached glyph quads and their borrowed texture handle.
+            pos: World or screen-space pen position.
+            color: RGBA glyph tint.
+            origin: Text pivot relative to the pen position.
+            rotation: Rotation in degrees around the text pivot.
+            z: Depth sort value.
+            layer: Render layer.
+            pass_name: Target pass, or ``None`` for layer-derived routing.
+            scissor: Optional screen-space clip rectangle.
+            blend_mode: Blend mode for the submission.
+            shader: Opaque shader handle passed intact to the canvas.
+            state_id: Previously interned state, if provided.
+            screen_space: Override layer-derived screen-space behavior.
         """
         import math
 
@@ -840,7 +925,7 @@ class Renderer(ServiceUnit):
 
         sizes = shaped.sizes_wh
         uvs = shaped.uv_rects
-        tex_id = int(shaped.tex_id)
+        tex_id = self._ubr.texture_id(shaped.texture)
         p_hash = pass_name_hash(item_pass)
         depth = is_depth_sorted_layer(layer_int, False)
         sid = int(item_state_id)
@@ -1215,9 +1300,9 @@ class Renderer(ServiceUnit):
         self,
         name: str,
         *,
-        target: RenderTexture | None = None,
-        camera: Any | None = None,
-        clear_color: PrColor | None = None,
+        target: RenderTextureHandle | None = None,
+        camera: ICamera2D | None = None,
+        clear_color: ColorType | None = None,
         viewport_scissor: RectType | None = None,
         order: int = 0,
         min_layer: int | None = None,

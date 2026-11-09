@@ -8,9 +8,10 @@ import numpy as np
 import pytest
 
 from plyunit.rendering.renderer import Renderer
+from rendering_fakes import TextureIdAdapter, make_texture
 
 
-class FakeUbr:
+class FakeUbr(TextureIdAdapter):
     capacity = 64
 
     def __init__(self) -> None:
@@ -41,8 +42,8 @@ def make_renderer(max_sprites: int = 64) -> tuple[Renderer, FakeUbr]:
 
 def test_render_sprites_writes_soa_per_texture() -> None:
     renderer, _ubr = make_renderer()
-    tex_a = SimpleNamespace(id=11, width=8, height=4)
-    tex_b = SimpleNamespace(id=22, width=16, height=16)
+    tex_a = make_texture(11, 8, 4)
+    tex_b = make_texture(22, 16, 16)
 
     renderer.render_sprites(
         textures=[tex_a, tex_b],
@@ -79,7 +80,7 @@ def test_render_sprites_writes_soa_per_texture() -> None:
 
 def test_render_sprites_sources_resolve_uv_per_texture() -> None:
     renderer, _ubr = make_renderer()
-    tex = SimpleNamespace(id=7, width=32, height=32)
+    tex = make_texture(7, 32, 32)
 
     renderer.render_sprites(
         textures=[tex, tex],
@@ -98,7 +99,7 @@ def test_render_sprites_sources_resolve_uv_per_texture() -> None:
 
 def test_render_sprites_skips_none_and_empty_inputs() -> None:
     renderer, _ubr = make_renderer()
-    tex = SimpleNamespace(id=1, width=4, height=4)
+    tex = make_texture(1, 4, 4)
 
     renderer.render_sprites(textures=[], positions=[])
     renderer.render_sprites(textures=None, positions=None)
@@ -117,7 +118,7 @@ def test_render_sprites_skips_none_and_empty_inputs() -> None:
 
 def test_render_sprites_min_length_semantics() -> None:
     renderer, _ubr = make_renderer()
-    tex = SimpleNamespace(id=1, width=4, height=4)
+    tex = make_texture(1, 4, 4)
 
     renderer.render_sprites(
         textures=[tex, tex, tex],
@@ -128,8 +129,8 @@ def test_render_sprites_min_length_semantics() -> None:
 
 def test_render_sprites_pos_xy_fast_path() -> None:
     renderer, _ubr = make_renderer()
-    tex_a = SimpleNamespace(id=1, width=4, height=4)
-    tex_b = SimpleNamespace(id=2, width=8, height=8)
+    tex_a = make_texture(1, 4, 4)
+    tex_b = make_texture(2, 8, 8)
     pos_xy = np.array([[0.0, 1.0], [2.0, 3.0]], dtype=np.float32)
 
     renderer.render_sprites(textures=[tex_a, tex_b], pos_xy=pos_xy)
@@ -146,8 +147,8 @@ def test_render_sprites_flush_submits_all_sprites() -> None:
         p = renderer.get_pass(name)
         if p:
             p.enabled = False
-    tex_a = SimpleNamespace(id=1, width=4, height=4)
-    tex_b = SimpleNamespace(id=2, width=8, height=8)
+    tex_a = make_texture(1, 4, 4)
+    tex_b = make_texture(2, 8, 8)
 
     renderer.render_sprites(
         textures=[tex_a, tex_b, tex_a],
@@ -162,7 +163,7 @@ def test_render_sprites_flush_submits_all_sprites() -> None:
 
 def test_render_sprites_overflows_capacity_with_force_flush() -> None:
     renderer, ubr = make_renderer(max_sprites=4)
-    tex = SimpleNamespace(id=1, width=4, height=4)
+    tex = make_texture(1, 4, 4)
     positions = [(float(i), 0.0) for i in range(6)]
 
     renderer.render_sprites(textures=[tex] * 6, positions=positions)
@@ -177,7 +178,7 @@ def test_render_sprites_overflows_capacity_with_force_flush() -> None:
 
 def test_render_sprites_submit_index_increments_after_single_sprite() -> None:
     renderer, _ubr = make_renderer()
-    tex = SimpleNamespace(id=1, width=4, height=4)
+    tex = make_texture(1, 4, 4)
 
     renderer.render_sprite(texture=tex, pos=(9.0, 9.0))
     renderer.render_sprites(textures=[tex, tex], positions=[(0.0, 0.0), (1.0, 1.0)])
@@ -191,7 +192,7 @@ def test_render_sprites_profile_counters() -> None:
     renderer, _ubr = make_renderer()
     renderer.profile_enabled = True
     renderer.reset_frame()
-    tex = SimpleNamespace(id=1, width=4, height=4)
+    tex = make_texture(1, 4, 4)
 
     renderer.render_sprites(textures=[tex, tex], positions=[(0.0, 0.0), (1.0, 1.0)])
 

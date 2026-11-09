@@ -10,7 +10,7 @@ Halaman ini mendokumentasikan struktur JSON yang saat ini diterima oleh `plyunit
 | Image asset | `Assets.load_asset` | One texture plus texture options |
 | Spritesheet asset | `Assets.load_spritesheet` | One texture split into named regions |
 | Animation config | `Animations.load` | Clips composed from asset/region IDs |
-| Font config | `Font.load` | Font files and named text templates |
+| Font config | `Text.load` | Font files and named text templates |
 | Tilemap | `TileMapNode` | Layers, GID mappings, chunks, objects, collision |
 | Audio bank | `Audio.load_bank` | SFX and music entries |
 | Autotile config | `AutotileProcessor` | Offline/editor bitmask rules |
@@ -34,11 +34,13 @@ Contoh komplit:
   "title": "My Game",
   "window_width": 1280,
   "window_height": 720,
+  "assets_path": "./data/assets",
+  "animation_path": "./data/animations",
+  "max_sprites": 16384,
   "target_fps": 60,
   "fixed_update_hz": 60,
   "max_frame_delta_time": 0.25,
   "max_substeps_per_frame": 5,
-  "background_color": [24, 32, 48, 255],
   "log_level": "INFO",
   "log_file_path": null,
   "physics": {
@@ -84,12 +86,21 @@ Contoh minimal:
 
 Aturan validasi penting:
 
-- Dimensi jendela, `fixed_update_hz`, `max_frame_delta_time`, dan
-`max_substeps_per_frame` harus lebih besar dari nol.
+- Window dimensions, `max_sprites`, `fixed_update_hz`, `max_frame_delta_time`, and
+  `max_substeps_per_frame` must be greater than zero.
 - `target_fps` boleh bernilai nol untuk *frame rate* tanpa batas.
 - Volume audio harus berada di antara `0,0` dan `1,0`.
 - `spatial_max_distance` harus lebih besar daripada `spatial_min_distance`.
-- *Field* akar atau *field* bersarang yang tidak dikenal akan ditolak.
+- Unknown root or nested fields are rejected.
+
+`animation_path: null` uses `assets_path` for the `Animations` service.
+`AppConfig` has no `background_color` field; choose the clear color in
+`App.update(dt)` with `window.clear_background((24, 32, 48, 255))`.
+The map's `settings.background_color` below is separate map metadata.
+
+Neutral image/spritesheet schemas live in `plyunit.services.assets.schemas`.
+The selected `Assets` adapter implements `plyunit.backends.ports.assets.IAssets`;
+loading GPU resources still requires the initialized window/context.
 
 ## Image asset configuration
 
@@ -132,12 +143,16 @@ Texture fields:
 
 | Field | Values | Default |
 | --- | --- | --- |
-| `filter` | `"nearest"`, `"linear"` | `"nearest"` |
-| `wrap` | `"repeat"`, `"clamp"`, `"mirror"` | `"clamp"` |
+| `filter` | `"nearest"`, `"linear"`, `"trilinear"` | `"nearest"` |
+| `wrap` | `"repeat"`, `"clamp"`, `"mirror"`, `"mirror_repeat"` | `"clamp"` |
 | `mipmap` | boolean | `false` |
 | `srgb` | boolean | `true`; parsed/stored but currently ignored by raylib |
 | `premultiply_alpha` | boolean | `false` |
 | `color_key` | `[r, g, b, a]` | `[0, 0, 0, 255]` |
+
+Unknown filter/wrap names and invalid color keys are rejected. RGBA channels
+must be integers from `0` to `255`. Trilinear filtering requires
+`mipmap: true`; omitted texture fields inherit the service's defaults.
 
 Saat diload melalui `load_asset`, `load_spritesheet`, atau `load_folder`,
 `image_path` pertama-tama diselesaikan (resolved) relatif terhadap basis aset. Jika tidak
@@ -182,16 +197,31 @@ Load and query it:
 ```python
 self.assets.load_spritesheet("characters/hero-sheet.json")
 
-texture_data = self.assets.get_texture_data("hero_run_0")
-texture = texture_data.texture
-source = texture_data.source_rect
-parent_id = texture_data.parent_id  # hero_sheet
+texture = self.assets.get_asset("hero_run_0")  # or self.assets["hero_run_0"]
+source = texture.source_rect
+parent_id = texture.parent_id  # hero_sheet before atlas packing
+asset_id = texture.texture_id  # logical string "hero_run_0", not a GPU integer
+
+self.renderer.render_sprite(texture=texture, pos=(100.0, 80.0))
+# source=None uses the handle's source_rect automatically.
 ```
 
-List regions must contain exactly four values. Object regions use the first
-four values of `rect`; a missing `rect` defaults to `[0, 0, 0, 0]`, and region
-dimensions are not validated. Region IDs enter the same asset cache as ordinary
-image IDs, so they should be globally unique.
+`get_asset` returns a `Texture2DHandle` directly, not a texture-data wrapper.
+Its `width` / `height` describe the whole GPU texture; use `source_rect[2:]`
+for the region dimensions. The numeric GPU ID is resolved by the batch adapter,
+not by reading the handle's logical `texture_id`.
+
+Region rectangles must contain exactly four finite values. Mapping entries
+accept `[x, y, w, h]` or `{"rect": [x, y, w, h]}`; a list of
+`{"name": "hero_run_0", "rect": [0, 32, 32, 32]}` entries is also accepted.
+The raylib adapter requires integer pixel coordinates, positive width/height,
+and a rectangle inside the source image. Region IDs share the asset cache
+namespace, must be unique, and cannot equal the owning sheet ID.
+
+Atlas packing replaces cache handles; resolve asset IDs again afterward.
+`Assets.store_texture` only adopts standalone root textures. Render-target,
+font-atlas, and streaming attachments are borrowed and cannot be stored or
+freed independently of their owner.
 
 The supported root ID field is `id`. Some old example/editor files contain
 `asset_id`, but the current spritesheet parser does not use that key as the
@@ -279,6 +309,18 @@ templates:
   }
 }
 ```
+
+```python
+text = pu.Text()  # create once in App.on_load, after bootstrap
+text.load("data/text.json")
+text["title"].push("My Game", pos=(20, 20), layer=pu.Layer.UI)
+```
+
+`Text.load` loads both fonts and templates. `Font` is an adapter-owned
+resource handle, not a config loader. `TemplateText` and `ShapedText` are
+neutral data in `backends.ports.text`; shaping-cache/template helpers live
+in `services/text.py`. Keep the text service and its fonts alive until queued
+text has flushed. Font atlas textures are borrowed, not `Assets` entries.
 
 Font entry fields:
 
@@ -576,10 +618,13 @@ Repository examples using these formats:
 
 | Format | Example |
 | --- | --- |
-| Spritesheet | `examples/tilemap/data/tileset.json` |
+| Spritesheet | `examples/test_assets/data/tile/tiles.json` |
 | Standalone animation | `examples/test_assets/data/player/animations.json` |
-| Tilemap | `examples/tilemap/data/map_lake.json` |
 | Image sidecars | `examples/test_assets/data/images/` |
+
+There is no tilemap demo/data directory in the current root `examples/` tree.
+Use the complete map JSON above for a new project; do not rely on the removed
+tilemap CLI examples.
 
 See [assets-tilemap-particles.md](assets-tilemap-particles.md),
 [tilemap-system.md](tilemap-system.md), and [audio.md](audio.md) for runtime

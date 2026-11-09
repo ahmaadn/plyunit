@@ -7,29 +7,39 @@ upload suitable for video / webcam / CPU-generated frames.
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 import plyunit as pu
 
+if TYPE_CHECKING:
+    from plyunit.backends.ports.handler import StreamingTextureHandle
+
 
 class StreamingApp(pu.App):
+    _stream: StreamingTextureHandle | None = None
+
     def on_load(self) -> None:
         self._t0 = time.perf_counter()
         self.draw = self.renderer.draw
 
-        self.canvas = pu.Canvas()
-        assert self.canvas.init_streaming(), "PBO streaming init failed"
+        if not self.canvas.init_streaming():
+            raise RuntimeError("PBO streaming init failed")
         self._w, self._h = 800, 480
         self._stream = self.canvas.create_streaming_texture(
             self._w, self._h, channels=4
         )
-        assert self._stream is not None
+        if self._stream is None:
+            raise RuntimeError("Failed to allocate the streaming texture")
         self._frame = 0
         # Prime one frame so the first visible sample is not blank.
         self._push_frame(0.0)
 
     def _push_frame(self, t: float) -> None:
+        stream = self._stream
+        if stream is None:
+            raise RuntimeError("The streaming texture is not available")
         # Cheap procedural RGBA pattern (w*h*4 bytes).
         yy, xx = np.mgrid[0 : self._h, 0 : self._w]
         phase = t * 40.0
@@ -38,7 +48,8 @@ class StreamingApp(pu.App):
         b = (((xx + yy) * 0.5 + phase) % 256).astype(np.uint8)
         a = np.full((self._h, self._w), 255, dtype=np.uint8)
         pixels = np.dstack((r, g, b, a)).tobytes()
-        self._stream.update(pixels)
+        if not stream.update(pixels):
+            raise RuntimeError("Failed to upload a streaming texture frame")
 
     def fixed_update(self, dt: float, step: int) -> None:
         _ = dt, step
@@ -56,11 +67,14 @@ class StreamingApp(pu.App):
         self._push_frame(t)
         self._frame += 1
 
+        stream = self._stream
+        if stream is None:
+            raise RuntimeError("The streaming texture is not available")
         draw = self.draw
         draw.rect((0, 0, 800, 480), (16, 18, 28, 255))
         # Scale streaming texture to window.
         draw.texture(
-            texture=self._stream.texture,
+            texture=stream.texture,
             dest=(40, 60, 720, 360),
             tint=(255, 255, 255, 255),
         )
@@ -75,8 +89,9 @@ class StreamingApp(pu.App):
         self.window.end_drawing()
 
     def on_unload(self) -> None:
-        if getattr(self, "_stream", None) is not None:
-            self.canvas.destroy_streaming_texture(self._stream)
+        stream = self._stream
+        if stream is not None:
+            self.canvas.destroy_streaming_texture(stream)
             self._stream = None
 
 

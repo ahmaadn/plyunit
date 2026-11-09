@@ -1,9 +1,7 @@
-"""Test: Scissor clipping dasar.
+"""Demonstrate basic and nested scissor clipping.
 
-Menggunakan API rendering baru:
-- set_scissor() masih menerima world coordinates
-- Scissor otomatis di-convert ke screen coords saat render
-- Nested scissor otomatis di-intersect
+Clip rectangles use world coordinates. The renderer converts them to screen
+coordinates and intersects each nested rectangle with its parent's clip.
 """
 
 import math
@@ -11,6 +9,7 @@ import math
 import pyray as pr
 
 import plyunit as pu
+from plyunit.backends.ports.renderer import ICanvas2D
 
 
 class AnimatedChild(pu.NodeUnit):
@@ -22,11 +21,11 @@ class AnimatedChild(pu.NodeUnit):
     def update(self, dt: float) -> None:
         self.time += dt
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         world_transform = self.world_transform_lerp()
         x, y = world_transform.position
 
-        # Bergerak melingkar keluar masuk area scissor
+        # Move in a circle across the clip boundary.
         offset_x = math.cos(self.time * 3.0) * 80.0
         offset_y = math.sin(self.time * 3.0) * 80.0
 
@@ -45,14 +44,14 @@ class ScrollingTextChild(pu.NodeUnit):
     def update(self, dt: float) -> None:
         self.time += dt
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         world_transform = self.world_transform_lerp()
         x, y = world_transform.position
 
         offset_x = math.sin(self.time * 2.0) * 200.0
 
         canvas.draw_text(
-            text="TEXT PANJANG TERPOTONG OLEH SCISSOR",
+            text="LONG TEXT CLIPPED BY SCISSOR",
             pos=(x + offset_x - 150, y),
             font_size=20,
             color=self.color,
@@ -68,7 +67,7 @@ class MovingCircleChild(pu.NodeUnit):
     def update(self, dt: float) -> None:
         self.time += dt
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         world_transform = self.world_transform_lerp()
         x, y = world_transform.position
 
@@ -89,7 +88,7 @@ class CustomDrawChild(pu.NodeUnit):
     def update(self, dt: float) -> None:
         self.time += dt
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         world_transform = self.world_transform_lerp()
         x, y = world_transform.position
 
@@ -100,7 +99,7 @@ class CustomDrawChild(pu.NodeUnit):
         size = 30
         angle = self.time * 100.0
 
-        # Gambar tanda 'X' berputar
+        # Draw a rotating X.
         p1_x = int(base_x + math.cos(math.radians(angle)) * size)
         p1_y = int(base_y + math.sin(math.radians(angle)) * size)
         p2_x = int(base_x - math.cos(math.radians(angle)) * size)
@@ -127,7 +126,7 @@ class ScissorContainer(pu.NodeUnit):
         self.color = color
 
     def update(self, dt: float) -> None:
-        # Buat container Outer sedikit bergoyang
+        # Animate the outer container.
         if self.title == "Outer Scissor":
             self.time = getattr(self, "time", 0.0) + dt
             self.transform.set_position(
@@ -135,16 +134,16 @@ class ScissorContainer(pu.NodeUnit):
                 100.0 + math.cos(self.time * 1.5) * 20.0,
             )
 
-        # Update area scissor menggunakan world coordinates
+        # Update the clip rectangle in world coordinates.
         world_transform = self.transform.world
         x, y = world_transform.position
         self.set_scissor((x, y, self.width, self.height))
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         world_transform = self.world_transform_lerp()
         x, y = world_transform.position
 
-        # Draw garis batas untuk memperjelas area scissor
+        # Outline the clipping area.
         canvas.draw_rectangle(
             rect=(x, y, self.width, self.height),
             color=self.color,
@@ -165,32 +164,32 @@ class MainScene(pu.SceneUnit):
         super().__init__("Main", tags={"main"})
 
     def on_load(self) -> None:
-        # Container luar (scissor warna merah)
+        # Outer container (red clip)
         outer = ScissorContainer(300, 300, "Outer Scissor", (255, 0, 0, 255))
         self.root.attach(outer)
         outer.transform.set_position(120, 100)
 
-        # Anak yang akan terpotong oleh container merah
+        # Child clipped by the red container
         child1 = AnimatedChild((0, 255, 0, 255))
         outer.attach(child1)
         child1.transform.set_position(150, 150)
 
-        # Teks berjalan untuk mengetes pemotongan teks
+        # Scrolling text tests text clipping.
         text_child = ScrollingTextChild((50, 50, 50, 255))
         outer.attach(text_child)
         text_child.transform.set_position(150, 250)
 
-        # Container dalam (scissor bersarang warna biru)
+        # Inner container (nested blue clip)
         inner = ScissorContainer(150, 150, "Inner", (0, 100, 255, 255))
         outer.attach(inner)
         inner.transform.set_position(75, 75)
 
-        # Anak di dalam container biru
+        # Child inside the blue container
         child2 = AnimatedChild((255, 255, 0, 255))
         inner.attach(child2)
         child2.transform.set_position(75, 75)
 
-        # Container saudara (sibling) untuk menguji independent bounding
+        # A sibling container tests independent clipping bounds.
         side_container = ScissorContainer(100, 250, "Side", (255, 120, 0, 255))
         self.root.attach(side_container)
         side_container.transform.set_position(470, 125)

@@ -220,20 +220,22 @@ def test_draw_override_and_custom_draw_opt_in_submit_custom_item() -> None:
     assert calls[1]["draw_func"].__self__ is opt_in
 
 
-def test_scene_dispatch_supports_legacy_render_submit_signature() -> None:
-    class LegacyNode(pu.NodeUnit):
+def test_scene_dispatch_passes_render_context() -> None:
+    class ContextNode(pu.NodeUnit):
         def __init__(self) -> None:
-            super().__init__(name="Legacy")
+            super().__init__(name="ContextNode")
             self.calls = 0
+            self.context = None
 
-        def render_submit(self, renderer: object) -> None:
+        def render_submit(self, renderer: object, context=None) -> None:
             _ = renderer
             self.calls += 1
+            self.context = context
 
-    scene = pu.SceneUnit(name="LegacyScene")
+    scene = pu.SceneUnit(name="ContextScene")
     scene._attach_subtree(scene.root)
-    legacy = LegacyNode()
-    scene.root.attach(legacy)
+    node = ContextNode()
+    scene.root.attach(node)
 
     class Renderer:
         def context_for_node(self, **kwargs):
@@ -251,7 +253,9 @@ def test_scene_dispatch_supports_legacy_render_submit_signature() -> None:
 
     scene.dispatch_render(Renderer())
 
-    assert legacy.calls == 1
+    assert node.calls == 1
+    assert node.context is node._render_context
+    assert node.context.pass_name == "world"
 
 
 def test_no_camera_render_submit_does_not_query_bounds() -> None:

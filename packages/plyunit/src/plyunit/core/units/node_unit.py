@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import inspect
 import weakref
 from collections import OrderedDict
 from collections.abc import Iterable, Iterator
-from typing import TYPE_CHECKING, overload
+from typing import TYPE_CHECKING
 
 from plyunit.core.components.component import Component
 from plyunit.core.components.component_registry import components as component_registry
@@ -16,8 +15,9 @@ from plyunit.rendering.enum import BlendMode, Layer
 from .unit import Unit
 
 if TYPE_CHECKING:
-    from plyunit.backends.interfaces.i_renderer import ICanvas2D
-    from plyunit.core.types import RectType, ShaderType
+    from plyunit.backends.ports.handler import ShaderHandle
+    from plyunit.backends.ports.renderer import ICanvas2D
+    from plyunit.core.types import RectType
     from plyunit.rendering.render_context import RenderContext
     from plyunit.rendering.renderer import Renderer
 
@@ -117,7 +117,7 @@ class NodeUnit(Unit):
         self.blend_mode: BlendMode | None = None
 
         # Shader for this node. None = inherit from parent.
-        self.shader: ShaderType | None = None
+        self.shader: ShaderHandle | None = None
 
         # Y-sort: if True, z_index is ignored and the Y position is used as the
         # sort key.
@@ -127,39 +127,8 @@ class NodeUnit(Unit):
         self._has_render_submit_override = (
             type(self).render_submit is not NodeUnit.render_submit
         )
-        self._render_submit_accepts_context = self._method_accepts_context(
-            type(self).render_submit
-        )
+
         self._has_draw_override = type(self).draw is not NodeUnit.draw
-
-    @staticmethod
-    def _method_accepts_context(method) -> bool:
-        """
-        Check whether the signature of ``method`` accepts ``RenderContext`` as
-        the second parameter.
-
-        Returns ``True`` if ``method`` has at least 3 positional parameters
-        (``self``, ``renderer``, ``context``) or ``*args``.
-        """
-        try:
-            parameters = inspect.signature(method).parameters.values()
-        except (TypeError, ValueError):
-            return True
-        try:
-            parameters = inspect.signature(method).parameters.values()
-        except (TypeError, ValueError):
-            return True
-
-        positional_count = 0
-        for parameter in parameters:
-            if parameter.kind is inspect.Parameter.VAR_POSITIONAL:
-                return True
-            if parameter.kind in {
-                inspect.Parameter.POSITIONAL_ONLY,
-                inspect.Parameter.POSITIONAL_OR_KEYWORD,
-            }:
-                positional_count += 1
-        return positional_count >= 3
 
     def destroy(self) -> None:
         """Destroy the unit and call its components' ``on_exit``/``on_destroy``.
@@ -527,31 +496,10 @@ class NodeUnit(Unit):
             or "draw" in self.__dict__
         )
 
-    def _call_render_submit(
-        self, renderer: Renderer, context: RenderContext | None = None
-    ) -> None:
-        """Internal hook: call :meth:`render_submit` with the correct signature.
-
-        Detects whether the overridden :meth:`render_submit` accepts
-        ``context`` or not.
-
-        Args:
-            renderer: Renderer to submit to.
-            context: Optional ``RenderContext``.
-        """
-        if self._render_submit_accepts_context:
-            self.render_submit(renderer, context)
-        else:
-            self.render_submit(renderer)  # type: ignore[misc]
-
     def update(self, dt: float) -> None:
         """Per fixed-step update hook (empty by default, override in subclasses)."""
         pass
 
-    @overload
-    def render_submit(self, renderer: Renderer) -> None: ...
-    @overload
-    def render_submit(self, renderer: Renderer, context: RenderContext) -> None: ...
     def render_submit(
         self, renderer: Renderer, context: RenderContext | None = None
     ) -> None:
@@ -629,7 +577,7 @@ class NodeUnit(Unit):
         """
         self.blend_mode = mode
 
-    def set_shader(self, shader: ShaderType | None) -> None:
+    def set_shader(self, shader: ShaderHandle | None) -> None:
         """Set the shader for this node and its subtree.
 
         Args:

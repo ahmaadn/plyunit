@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 import plyunit as pu
+from examples.test_assets.load_assets import load_tiles
 
 logger = logging.Logger(__name__)
 
@@ -20,8 +21,27 @@ class PlayerNode(pu.NodeUnit):
         animation.play("player.run")
 
 
+class AssetStatus(pu.NodeUnit):
+    """Submit the asset example's status message in screen space."""
+
+    def __init__(self) -> None:
+        super().__init__(name="AssetStatus")
+        self.layer = pu.Layer.UI
+
+    def render_submit(self, renderer: pu.Renderer, context=None) -> None:
+        self.one("@Text").render(
+            "This is a test for assets. It doesn't do anything yet.",
+            z=0,
+            layer=pu.Layer.UI,
+            pos=(0, 0),
+            font_size=20,
+            color=(0, 0, 0, 255),
+        )
+
+
 class TestScreen(pu.SceneUnit):
     def on_load(self) -> None:
+        self.root.attach(AssetStatus())
         player = PlayerNode()
         self.root.attach(player)
         player.transform.set_position(200, 200)
@@ -33,16 +53,6 @@ class TestScreen(pu.SceneUnit):
 
         self.one("@Camera2D").teleport(player)
         self.one("@Camera2D").set_pivot(0.5, 0.5)
-
-    def render_submit(self, renderer: pu.Renderer) -> None:
-        self.one("@Text").render(
-            "This is a test for assets. It doesn't do anything yet.",
-            z=0,
-            layer=pu.Layer.UI,
-            pos=(0, 0),
-            font_size=20,
-            color=(0, 0, 0, 255),
-        )
 
 
 class TestAssetsApp(pu.App):
@@ -58,13 +68,13 @@ class TestAssetsApp(pu.App):
             "images/test.png",
             asset_id="test_texture",
         )
-        self.one("@Assets").load_folder("background")
+        self.one("@Assets").load_asset("background/config.json")
         self.one("@Assets").load_folder("player/run")
 
         self.one("@Assets").load_asset(
             "images_with_json/config.json", asset_id="test_texture_with_json"
         )
-        self.one("@Assets").load_spritesheet("tile/tiles.json")
+        load_tiles(self.one("@Assets"))
 
         self.animations.set_base_path(script_dir / "data")
         self.animations.load("player/animations.json")

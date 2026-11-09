@@ -5,17 +5,16 @@ from pathlib import Path
 
 import pytest
 
-import plyunit as pu
-from plyunit.assets.animations import AnimationClip, AnimationFrame, Animations
+from plyunit.core.units.unit_registry import UnitRegistry
+from plyunit.services.animations import AnimationClip, AnimationFrame, Animations
 
 unit_module = importlib.import_module("plyunit.core.units.unit")
 
 
 @pytest.fixture()
-def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> pu.UnitRegistry:
-    registry = pu.UnitRegistry()
+def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> UnitRegistry:
+    registry = UnitRegistry()
     monkeypatch.setattr(unit_module, "units", registry)
-    monkeypatch.setattr(pu, "units", registry, raising=False)
     return registry
 
 
@@ -37,7 +36,7 @@ def test_animation_frame_and_clip_validation() -> None:
 
 
 def test_animations_add_clip_groups_and_base_path(
-    isolated_registry: pu.UnitRegistry,
+    isolated_registry: UnitRegistry,
 ) -> None:
     _ = isolated_registry
 
@@ -56,7 +55,7 @@ def test_animations_add_clip_groups_and_base_path(
 
 
 def test_animations_load_animation_defaults_and_group(
-    isolated_registry: pu.UnitRegistry,
+    isolated_registry: UnitRegistry,
 ) -> None:
     _ = isolated_registry
 

@@ -6,7 +6,6 @@ from __future__ import annotations
 import logging
 import time
 from typing import TYPE_CHECKING
-from warnings import deprecated
 
 from plyunit.rendering.enum import BlendMode, Layer
 from plyunit.utils.math import (
@@ -151,11 +150,6 @@ class SceneUnit(Unit):
         render_start = time.perf_counter() if self.profile_enabled else 0.0
         self._is_traversing = True
 
-        # TODO: deprecated in the future — scene-level render submit will be
-        # replaced by the Root Node; the Root Node will be customizable via
-        # the scene's __init__. Root Node rules: it must be named "root" and
-        # carry the "root" tag.
-        self.render_submit(renderer)
         try:
             view_rect = self._get_frustum_cull_rect()
             candidates: set[object] | None = None
@@ -323,7 +317,7 @@ class SceneUnit(Unit):
                     shader=shader,
                     render_transform=render_transform,
                 )
-                node._call_render_submit(renderer, context)
+                node.render_submit(renderer, context)
                 node._render_components(renderer, context)
 
             node._render_context = context
@@ -773,12 +767,4 @@ class SceneUnit(Unit):
 
     def update(self, dt: float) -> None:
         """Override for scene-level update logic."""
-        pass
-
-    @deprecated(
-        "Versi mendatang Scene tidak bisa melakaukan render sumbit,"
-        "gunakan node root sebagai gantinya"
-    )
-    def render_submit(self, renderer: Renderer) -> None:
-        """Override for scene-level render submit logic."""
         pass

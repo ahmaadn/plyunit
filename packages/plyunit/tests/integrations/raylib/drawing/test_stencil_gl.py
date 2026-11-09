@@ -4,8 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.gl_ffi as gl_ffi
-import plyunit.backends.integrations.raylib.drawing.stencil as stencil_mod
+import plyunit.backends.integrations.raylib.renderer.gl_ffi as gl_ffi
+import plyunit.backends.integrations.raylib.renderer.stencil as stencil_mod
 
 
 @pytest.fixture()
@@ -89,7 +89,7 @@ def test_gl_ffi_reset_and_has(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         gl_ffi.pr,
         "ffi",
-        SimpleNamespace(NULL=None, cast=lambda s, a: lambda *x: None),
+        SimpleNamespace(NULL=None, cast=lambda s, a: 1234 if s == "uintptr_t" else lambda *x: None),
         raising=False,
     )
     gl_ffi.get_gl_func("glEnable", "void(*)(unsigned int)")

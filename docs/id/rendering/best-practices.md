@@ -17,7 +17,7 @@ Perlu gambar apa?
 ├─ Shape / line / circle
 │     → canvas.create_rect / create_circle / ... (bake sekali)
 │     → simpan via Assets.store_texture, render via render_sprite / render_sprites
-│     → (immediate render_rect / render_circle / render_line deprecated)
+│     → Dynamic/debug outlines: render_custom + canvas.draw_*
 │
 ├─ UI (screen space)
 │     → typed render_* with Layer.UI / Text.push
@@ -28,12 +28,14 @@ Perlu gambar apa?
 
 ## 2. Do
 
-- **Submit di `render_submit`**, bukan di `update` (queue diisi per frame render).
+- **Nodes/components submit in `render_submit(renderer, context)`**, not fixed `update`. App-level submissions belong in `App.update(dt)` after `reset_frame` and before `flush_all`.
 - **Samakan material** dalam satu batch: texture, source, layer, z, tint, scale, rotation, origin, blend, shader, scissor.
 - **Pakai `z` / `z_index` sama** untuk objek yang tidak butuh urutan unik (z unik memecah run).
 - **Transform lewat setter**: `set_position` / `set_rotation` / `set_scale` agar SoA dirty tracking benar.
 - **Cull opt-in**: `SpatialIndex` hanya jika perlu query gameplay / cull besar; **matikan** di bunny-style stress (flat list).
 - **Hot path data-oriented**: array contiguous `numpy.float32` untuk posisi dan `pos_xy=` agar bulk append tanpa loop Python; data tetap disalin ke FrameBuffer.
+- **Opaque handles**: resolve textures from `Assets`; do not read raw resource fields or assume the logical `texture_id` is a GPU integer.
+- **Load once**: bake reusable geometry in load hooks after bootstrap; `Assets` owns standalone textures, never borrowed render-target/font/stream attachments.
 
 ## 3. Don't
 
@@ -114,13 +116,12 @@ class BunnyLikeField(pu.NodeUnit):
         self.vel_xy = np.zeros((n, 2), dtype=np.float32)
 
     def update(self, dt: float) -> None:
-        self.pos_xy += self.vel_xy  # vectorized sim
+        self.pos_xy += self.vel_xy * dt  # velocities in pixels per second
         # bounce / wrap ...
 
     def render_submit(self, renderer, context=None) -> None:
         renderer.render_batch(
             texture=self.texture,
-            positions=self.pos_xy,   # optional if pos_xy set
             pos_xy=self.pos_xy,      # vectorized copy → FrameBuffer → UBR
             layer=int(pu.Layer.ENTITIES),
             z=0,
@@ -128,7 +129,13 @@ class BunnyLikeField(pu.NodeUnit):
         )
 ```
 
-Detail: [ubr.md](ubr.md).
+`Canvas2D()` returns the module-backed drawing port, not a Canvas class.
+For dynamic geometry use `render_custom` with the supplied `ICanvas2D` and
+its `draw_rectangle` / `draw_circle` / `draw_line` methods. The former
+`Renderer` primitive-submit methods are removed, with no fallback aliases.
+`SceneUnit` has no `render_submit`; put rendering in a node/system or the App.
+
+Details: [ubr.md](ubr.md).
 
 ## 5. Entity density cheat sheet
 

@@ -1,4 +1,4 @@
-from plyunit.audio.spatial import compute_spatial
+from plyunit.services.audio.spatial import compute_spatial
 
 
 def test_spatial_full_volume_inside_min_distance() -> None:

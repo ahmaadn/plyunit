@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.canvas as Canvas
+from plyunit.backends.integrations.raylib.handler import Shader, Texture2D
+import plyunit.backends.integrations.raylib.renderer.canvas as Canvas
 
 
 @pytest.fixture()
@@ -74,7 +75,7 @@ def fake_pr(monkeypatch: pytest.MonkeyPatch):
         clear_background=lambda c: calls.append(("clear", c)),
         get_screen_width=lambda: 800,
         get_screen_height=lambda: 600,
-        gui_get_font=lambda: SimpleNamespace(name="default"),
+        get_font_default=lambda: SimpleNamespace(name="default"),
     )
     monkeypatch.setattr(Canvas, "pr", fake)
     return calls
@@ -101,7 +102,7 @@ def test_canvas_gpu_modes(fake_pr):
     Canvas.begin_blend_mode(1)
     Canvas.end_blend_mode()
     # pyrefly: ignore [bad-argument-type]
-    Canvas.begin_shader_mode(SimpleNamespace(id=1))
+    Canvas.begin_shader_mode(Shader(SimpleNamespace(id=1)))
     Canvas.end_shader_mode()
     assert any(c[0] == "scissor" for c in calls)
     assert any(c[0] == "blend" for c in calls)
@@ -110,7 +111,7 @@ def test_canvas_gpu_modes(fake_pr):
 def test_canvas_text_and_texture(fake_pr):
     calls = fake_pr
     Canvas.draw_text(text="hi", pos=(0, 0), font_size=16, color=(255, 255, 255, 255))
-    tex = SimpleNamespace(id=1, width=8, height=8)
+    tex = Texture2D.from_raw(SimpleNamespace(id=1, width=8, height=8, format=7))
     # pyrefly: ignore [bad-argument-type]
     Canvas.draw_texture(texture=tex, pos=(0, 0))
     assert any(c[0].startswith("text") or c[0].startswith("tex") for c in calls)

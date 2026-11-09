@@ -10,10 +10,13 @@ from collections.abc import Generator, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
-from plyunit.core.types import ColorType, RectType, ShaderType
-from plyunit.rendering.enum import BlendMode
+from plyunit.core.types import ColorType, RectType
+
+from .enum import BlendMode
 
 if TYPE_CHECKING:
+    from plyunit.backends.ports.handler import RenderTextureHandle, ShaderHandle
+    from plyunit.backends.ports.renderer import ICanvas2D
     from plyunit.rendering.renderer import Renderer
 
 
@@ -79,16 +82,16 @@ class DrawScope:
         self._renderer = renderer
         self._scissor_stack: list[tuple[int, int, int, int] | None] = []
         self._blend_stack: list[int | None] = []
-        self._shader_stack: list[Any | None] = []
-        self._texture_stack: list[Any | None] = []
+        self._shader_stack: list[ShaderHandle | None] = []
+        self._texture_stack: list[RenderTextureHandle | None] = []
         self._active_scissor: tuple[int, int, int, int] | None = None
         self._active_blend: int | None = None
-        self._active_shader: Any | None = None
-        self._active_texture: Any | None = None
+        self._active_shader: ShaderHandle | None = None
+        self._active_texture: RenderTextureHandle | None = None
         self._stencil_active: bool = False
 
     @property
-    def canvas(self):
+    def canvas(self) -> ICanvas2D:
         """The renderer's backend canvas (read-only)."""
         return self._renderer.canvas
 
@@ -114,23 +117,6 @@ class DrawScope:
         if self._stencil_active:
             canvas.end_stencil_mode()
             self._stencil_active = False
-
-    def _resolve_shader(self, shader_or_handle: Any) -> ShaderType:
-        """Resolves a handle/wrapped/raw shader into a backend shader.
-
-        Args:
-            shader_or_handle: Shader object or :class:`ShaderHandle`.
-
-        Returns:
-            ShaderType: Backend shader object ready to use.
-        """
-        raw = getattr(shader_or_handle, "raw", None)
-        if raw is not None:
-            return raw
-        shader = getattr(shader_or_handle, "shader", None)
-        if shader is not None and not callable(shader):
-            return shader
-        return shader_or_handle
 
     @contextmanager
     def scissor(self, x: float, y: float, w: float, h: float) -> Generator[None]:
@@ -198,11 +184,11 @@ class DrawScope:
                 canvas.end_blend_mode()
 
     @contextmanager
-    def shader(self, shader_or_handle: Any) -> Generator[None]:
+    def shader(self, shader: ShaderHandle) -> Generator[None]:
         """Shader context manager (temporarily replaces the active shader).
 
         Args:
-            shader_or_handle: :class:`ShaderType` or :class:`ShaderHandle`.
+            shader: Opaque shader handle passed intact to the canvas.
 
         Yields:
             None: Duration of the shader.
@@ -214,9 +200,8 @@ class DrawScope:
         canvas = self.canvas
         prev = self._active_shader
         self._shader_stack.append(prev)
-        resolved = self._resolve_shader(shader_or_handle)
-        canvas.begin_shader_mode(resolved)
-        self._active_shader = resolved
+        canvas.begin_shader_mode(shader)
+        self._active_shader = shader
         try:
             yield
         finally:
@@ -228,11 +213,11 @@ class DrawScope:
                 canvas.end_shader_mode()
 
     @contextmanager
-    def texture_mode(self, target: Any) -> Generator[None]:
+    def texture_mode(self, target: RenderTextureHandle) -> Generator[None]:
         """Render-to-texture context manager.
 
         Args:
-            target: Backend render texture target.
+            target: Opaque offscreen render-target handle.
 
         Yields:
             None: Duration of render-to-texture.

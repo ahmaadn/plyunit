@@ -1,12 +1,7 @@
-"""Example: Render Target (Minimap)
+"""Render a world-space scene with an offscreen minimap overlay.
 
-Demonstrasi penggunaan Render Target untuk membuat minimap.
-- World utama di-render ke screen via default pass
-- Minimap di-render ke RenderTexture2D via pass terpisah
-- Minimap ditampilkan sebagai overlay di sudut layar
-
-Kontrol:
-- WASD: gerakkan player
+The minimap pass draws into a render-target handle before the screen-space
+UI pass samples its color-attachment texture. Use WASD to move the player.
 """
 
 import math
@@ -14,10 +9,13 @@ import math
 import pyray as pr
 
 import plyunit as pu
+from plyunit.backends.ports.camera2d import ICamera2D
+from plyunit.backends.ports.handler import RenderTextureHandle
+from plyunit.backends.ports.renderer import ICanvas2D
 
 
 class Player(pu.NodeUnit):
-    """Player yang bisa digerakkan."""
+    """Move the player using the mapped directional actions."""
 
     def __init__(self) -> None:
         super().__init__(name="Player")
@@ -38,11 +36,11 @@ class Player(pu.NodeUnit):
                 cy + dy * self.speed * dt,
             )
 
-    def draw(self, canvas: pu.interfaces.ICanvas2D) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         wt = self.world_transform_lerp()
         x, y = wt.position
 
-        # Bayangan
+        # Shadow
         canvas.draw_ellipse(
             center=(x, y + 3),
             radius_h=12.0,
@@ -50,7 +48,7 @@ class Player(pu.NodeUnit):
             color=(0, 0, 0, 60),
         )
 
-        # Badan
+        # Body
         canvas.draw_rectangle(
             rect=(x - 8, y - 24, 16, 24),
             color=(80, 150, 255, 255),
@@ -58,7 +56,7 @@ class Player(pu.NodeUnit):
             segments=6,
         )
 
-        # Kepala
+        # Head
         canvas.draw_circle(
             center=(x, y - 30),
             radius=8.0,
@@ -67,24 +65,24 @@ class Player(pu.NodeUnit):
 
 
 class House(pu.NodeUnit):
-    """Rumah sederhana."""
+    """Draw a simple house."""
 
     def __init__(self, color: tuple[int, int, int, int]) -> None:
         super().__init__(name="House")
         self.color = color
         self.layer = pu.Layer.WORLD
 
-    def draw(self, canvas: pu.interfaces.ICanvas2D) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         wt = self.world_transform_lerp()
         x, y = wt.position
 
-        # Badan rumah
+        # House walls
         canvas.draw_rectangle(
             rect=(x - 30, y - 25, 60, 50),
             color=self.color,
         )
 
-        # Atap (triangle)
+        # Roof
         canvas.draw_triangle(
             v1=(x, y - 55),
             v2=(x - 38, y - 25),
@@ -97,7 +95,7 @@ class House(pu.NodeUnit):
             ),
         )
 
-        # Pintu
+        # Door
         canvas.draw_rectangle(
             rect=(x - 8, y + 5, 16, 20),
             color=(60, 40, 20, 255),
@@ -105,7 +103,7 @@ class House(pu.NodeUnit):
 
 
 class WorldBorder(pu.NodeUnit):
-    """Batas dunia — garis border."""
+    """Draw the world boundary and reference grid."""
 
     WORLD_W = 800
     WORLD_H = 600
@@ -117,7 +115,7 @@ class WorldBorder(pu.NodeUnit):
     def get_render_bounds(self) -> tuple[float, float, float, float]:
         return (0.0, 0.0, float(self.WORLD_W), float(self.WORLD_H))
 
-    def draw(self, canvas: pu.interfaces.ICanvas2D) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         # Grid
         for gx in range(0, self.WORLD_W + 1, 50):
             canvas.draw_line(
@@ -142,78 +140,92 @@ class WorldBorder(pu.NodeUnit):
 
 
 class MinimapRenderer(pu.NodeUnit):
-    """Renders the minimap overlay ke screen.
-
-    Ini menggambar dunia dalam skala kecil langsung menggunakan custom draw,
-    menunjukkan posisi player dan objek-objek penting.
-    """
+    """Render map markers offscreen and display the target as a UI overlay."""
 
     def __init__(self, player: Player, houses: list[House]) -> None:
         super().__init__(name="MinimapRenderer")
         self.layer = pu.Layer.OVERLAY
         self.player_ref = player
         self.house_refs = houses
-
-        # Ukuran dan posisi minimap di screen
         self.map_w = 160
         self.map_h = 120
-        self.map_x = 640 - self.map_w - 10  # Kanan atas
+        self.map_x = 640 - self.map_w - 10
         self.map_y = 10
-
-        # Skala world -> minimap
         self.scale_x = self.map_w / WorldBorder.WORLD_W
         self.scale_y = self.map_h / WorldBorder.WORLD_H
+        self._target: RenderTextureHandle | None = None
+        self._renderer: pu.Renderer | None = None
 
-    def draw(self, canvas: pu.interfaces.ICanvas2D) -> None:
+    def on_ready(self) -> None:
+        renderer = self.one("@Renderer")
+        self._renderer = renderer
+        self._target = renderer.canvas.load_render_texture(self.map_w, self.map_h)
+        renderer.create_pass(
+            "minimap",
+            target=self._target,
+            clear_color=(20, 25, 20, 255),
+            order=-10,
+            screen_space=True,
+        )
+
+    def render_submit(self, renderer: pu.Renderer, context=None) -> None:
+        if self._target is None:
+            return
+        renderer.render_custom(draw_func=self._draw_map, pass_name="minimap")
+        super().render_submit(renderer, context)
+
+    def _draw_map(self, canvas: ICanvas2D) -> None:
+        """Draw map-local markers while the minimap target is active."""
+        for house in self.house_refs:
+            hx, hy = house.world_transform_lerp().position
+            canvas.draw_rectangle(
+                rect=(hx * self.scale_x - 4, hy * self.scale_y - 4, 8, 8),
+                color=(180, 120, 80, 255),
+            )
+        px, py = self.player_ref.world_transform_lerp().position
+        canvas.draw_circle(
+            center=(px * self.scale_x, py * self.scale_y),
+            radius=4.0,
+            color=(80, 200, 255, 255),
+        )
+
+    def draw(self, canvas: ICanvas2D) -> None:
+        if self._target is None:
+            return
         mx, my = self.map_x, self.map_y
-
-        # Background minimap
         canvas.draw_rectangle(
             rect=(mx - 2, my - 2, self.map_w + 4, self.map_h + 4),
             color=(40, 40, 50, 200),
             roundness=0.05,
             segments=4,
         )
-        canvas.draw_rectangle(
-            rect=(mx, my, self.map_w, self.map_h),
-            color=(20, 25, 20, 220),
+        # Raylib render targets are vertically inverted. Sample the borrowed
+        # color attachment directly; do not wrap it or unload it separately.
+        canvas.draw_texture(
+            texture=self._target.texture,
+            source=(0, 0, self.map_w, -self.map_h),
+            dest=(mx, my, self.map_w, self.map_h),
         )
-
-        # Border
         canvas.draw_rectangle(
             rect=(mx, my, self.map_w, self.map_h),
             color=(100, 120, 100, 200),
             outline_only=True,
             thickness=1.0,
         )
-
-        # Gambar rumah-rumah di minimap
-        for house in self.house_refs:
-            hx, hy = house.transform.world.position
-            hmx = mx + hx * self.scale_x
-            hmy = my + hy * self.scale_y
-            canvas.draw_rectangle(
-                rect=(hmx - 4, hmy - 4, 8, 8),
-                color=(180, 120, 80, 200),
-            )
-
-        # Gambar player di minimap
-        px, py = self.player_ref.transform.world.position
-        pmx = mx + px * self.scale_x
-        pmy = my + py * self.scale_y
-        canvas.draw_circle(
-            center=(pmx, pmy),
-            radius=4.0,
-            color=(80, 200, 255, 255),
-        )
-
-        # Label
         canvas.draw_text(
             text="MINIMAP",
             pos=(mx + 5, my + self.map_h + 5),
             font_size=11,
             color=(120, 120, 140, 200),
         )
+
+    def on_exit_tree(self) -> None:
+        """Release the render target while its graphics context is still alive."""
+        if self._renderer is not None and self._target is not None:
+            self._renderer.remove_pass("minimap")
+            self._renderer.canvas.unload_render_texture(self._target)
+            self._target = None
+        super().on_exit_tree()
 
 
 class MainScene(pu.SceneUnit):
@@ -230,7 +242,7 @@ class MainScene(pu.SceneUnit):
         self.root.attach(player)
         player.transform.set_position(400, 300)
 
-        # Rumah-rumah
+        # Houses
         houses = []
         house_data = [
             ((180, 100, 80, 255), (150, 150)),
@@ -245,7 +257,7 @@ class MainScene(pu.SceneUnit):
             house.transform.set_position(*pos)
             houses.append(house)
 
-        # Minimap (UI overlay — tidak terpengaruh kamera)
+        # Screen-space minimap overlay
         minimap = MinimapRenderer(player, houses)
         self.root.attach(minimap)
 
@@ -260,11 +272,12 @@ class RenderTargetApp(pu.App):
         self.input.map("move_left", pr.KeyboardKey.KEY_A)
         self.input.map("move_right", pr.KeyboardKey.KEY_D)
 
-        # Setup camera mengikuti player
-        self.camera: pu.Camera2D = pu.Camera2D(size=(640, 500), position=(400, 300))
+        # Follow the player with a short smoothing interval.
+        self.camera: ICamera2D = pu.Camera2D(
+            size=(640, 500), position=(400, 300), slowness=0.1
+        )
         self.camera.setup(640, 500)
         self.camera.teleport((400, 300))
-        self.camera.lerp_speed = 0.1
         self.scene_manager.push(MainScene())
         self.text = pu.Text()
 

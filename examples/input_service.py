@@ -12,12 +12,15 @@ class VelocityComponent(pu.Component):
 
 class PlayerControllerComponent(pu.Component):
     def update(self, dt: float) -> None:
-        dir_x = self.unit.one("@Input").get_axis("move_left", "move_right")
-        dir_y = self.unit.one("@Input").get_axis("move_up", "move_down")
+        unit = self.unit
+        if not isinstance(unit, PlayerUnit):
+            return
+        dir_x = unit.one("@Input").get_axis("move_left", "move_right")
+        dir_y = unit.one("@Input").get_axis("move_up", "move_down")
 
-        velocity = self.unit[VelocityComponent]
-        velocity.x = dir_x * self.unit.speed
-        velocity.y = dir_y * self.unit.speed
+        velocity = unit[VelocityComponent]
+        velocity.x = dir_x * unit.speed
+        velocity.y = dir_y * unit.speed
 
 
 class PlayerUnit(pu.NodeUnit):
@@ -40,18 +43,21 @@ class PlayerUnit(pu.NodeUnit):
 
         self.transform.set_position(new_x, new_y)
 
-    def render_submit(self, renderer: pu.Renderer) -> None:
+    def on_ready(self) -> None:
+        """Cache the handle owned by the application's asset service."""
+        self._texture = self.one("@Assets").get_asset("input_player")
 
-        # gunakan world_transform_lerp untuk mendapatkan posisi yang
-        # lebih halus saat rendering
+    def render_submit(self, renderer: pu.Renderer, context=None) -> None:
+
+        # Interpolate the world transform for smooth rendering.
         world_transform = self.world_transform_lerp()
 
         x, y = world_transform.position
-        renderer.render_rect(
+        renderer.render_sprite(
             z=0,
             layer=pu.Layer.WORLD,
-            rect=(x, y, 30.0, 30.0),
-            color=(0, 255, 0, 255),
+            texture=self._texture,
+            pos=(x, y),
         )
 
 
@@ -75,6 +81,12 @@ class MyApp(pu.App):
         self.input.map("move_left", ry.KEY_A, ry.KEY_LEFT)
         self.input.map("move_right", ry.KEY_D, ry.KEY_RIGHT)
 
+        self.assets.store_texture(
+            "input_player",
+            self.renderer.canvas.create_rect(
+                rect=(0, 0, 30, 30), color=(0, 255, 0, 255)
+            ),
+        )
         self.scene_manager.push(MainScene())
 
     def fixed_update(self, dt: float, step: int) -> None:

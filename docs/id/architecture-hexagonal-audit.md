@@ -1,27 +1,35 @@
 # Hexagonal architecture audit
 
-This document describes the current `src/plyunit` layout. It replaces the old
-generated snapshot that referenced removed `plyunit.api`, `plyunit.input`,
-renderer facades, and render-target operation modules.
+This document describes the current `packages/plyunit/src/plyunit` layout
+and its ports-and-adapters boundary. This is a breaking migration: removed
+module paths, service loaders, and renderer methods have no compatibility
+aliases. See [migration.md](migration.md).
 
 ## Dependency direction
 
 ```text
-core / events / services / rendering / assets / audio / tilemap
+core / events / rendering / services / tilemap / utils
                          │
                          ▼
-              backends.interfaces protocols
+                  backends.ports
                          ▲
                          │
        backends.integrations.raylib / backends.physics.pymunk
+                         ▲
                          │
-                         ▼
-             integrations._bootstrap composition root
+             _bootstrap + lazy public facade
 ```
 
-The package root `plyunit.__init__` owns a lazy export map. There is no
-`plyunit.api` package. Input classes are exported through
-`plyunit.services.input` and the root facade.
+The package root `plyunit.__init__` owns a lazy export map. Plain
+`import plyunit` does not load raylib, pymunk, or ImGui. Backend selection
+happens at the facade/composition boundary; neutral modules import contracts
+from `plyunit.backends.ports`, never the concrete backend or its selector.
+
+Neutral services/data include `services/animations.py`,
+`services/assets/schemas.py`, `services/assets/atlas.py`,
+`services/spatial_index.py`, `services/text.py`, and `services/shaders.py`.
+Concrete input, assets, audio, text, and shader services live under
+`backends/integrations/raylib` and are selected by root facade exports.
 
 ## Current boundaries
 
@@ -29,10 +37,12 @@ The package root `plyunit.__init__` owns a lazy export map. There is no
 | --- | --- | --- | --- |
 | Window | `App`, `Window` root export | `IWindow` | raylib `Window` |
 | Camera | `Camera2D` root export | `ICamera2D` | raylib `Camera2D` |
-| Canvas/rendering | `Renderer`, `DrawScope`, `RenderPass` | `ICanvas2D`, `IUnifiedBufferBatch` | raylib `Canvas`, native UBR |
-| Assets | `Assets`, `Text`, `Shaders` | `IAssetsLoader`, `IFont`, `IShaderLoader` | raylib loaders/font |
-| Input | `Input`, `Mouse`, `Gamepad`, `Touch` | `IInput`, `IMouse`, `IGamepad`, `ITouch` | raylib input adapters |
-| Audio | `Audio` | `IAudioBackend` | raylib `AudioBackend` |
+| Canvas/rendering | `Renderer`, `DrawScope`, `RenderPass` | `ICanvas2D`, `IUnifiedBufferBatch` | module-backed raylib canvas, native UBR |
+| Assets/images | `Assets`, `ImageProcessor` | `IAssets`, `IImageProcessor` | raylib assets adapter |
+| Text/fonts | `Text`, `ShapedText`, `TemplateText` | `IText`, `ITextRenderer`, `FontHandle` | raylib text service |
+| Shaders | `Shaders`, `ShaderHandle` | `IShaders`, `ShaderHandle` | raylib shader service |
+| Input | `Input`, `Mouse`, `Gamepad`, `Touch` | `IInput`, `IMouse`, `IGamepad`, `ITouch` | separate raylib device adapters |
+| Audio | `Audio` | `IAudio` | raylib audio service |
 | Physics | `Physics`, body/area/shape APIs | `PhysicsBackend` adapter boundary | pymunk |
 | ImGui | `ImGui` | `ImGuiBackend` | imgui-bundle/raylib backend |
 
@@ -42,19 +52,20 @@ baking and submits baked chunks or tiles through `Renderer.render_sprite`.
 
 ## Composition root
 
-`init` and `create_app` in
-`src/plyunit/backends/integrations/_bootstrap.py` select concrete backends and
+`init` and `create_app` in `plyunit._bootstrap` select concrete backends and
 wire the application:
 
-1. Resolve window, canvas, and native UBR adapters.
-2. Construct `Renderer`, `SceneManager`, `Assets`, and `Animations`.
-3. Call `app.init(cfg)` to initialize the window and App registry.
-4. Install optional `Physics`, `ImGui`, and `Audio` services; they attach through the
-   active global registry.
-
-The current code constructs `Renderer` and calls `ubr.init()` before
-`app.init(cfg)` initializes the window. This ordering is significant for native
-backends that require a live graphics context.
+1. Resolve the configured window, canvas, native batch, assets, and camera
+   factories. `Canvas2D()` returns the raylib canvas module, not a class instance.
+2. Inject the adapters and construct `Renderer`, `SceneManager`, `Assets`,
+   `Animations`, and the default camera. Renderer construction does not perform
+   native GPU initialization.
+3. Call `app.init(cfg)`: open the window, set up the camera, then call
+   `Renderer.init()` / `ubr.init()` with a live graphics context.
+4. Construct optional `Physics`, `ImGui`, and `Audio` services after App
+   initialization; the active global registry retains them.
+5. `app.run()` calls `on_load` before entering the loop. Load textures/fonts or
+   bake reusable shapes here (or in scene/node load hooks), not before bootstrap.
 
 Gameplay utilities are explicit services:
 
@@ -87,17 +98,46 @@ The old `*Service` names are not compatibility aliases.
 ## Current rendering boundary
 
 ```text
-SceneUnit.dispatch_render
-  → NodeUnit/component render_submit
-  → Renderer.render_sprite(s)       → FrameBuffer SoA
-  → Renderer.render_* primitives    → typed queue
-  → Renderer.render_shaped_text     → FrameBuffer/typed text path
-  → Renderer.render_custom          → typed queue callback
-  → Renderer.flush_all              → passes, state, native UBR, Canvas
+SceneManager.render(renderer)
+  → SceneUnit.dispatch_render(renderer)
+  → NodeUnit/component render_submit(renderer, context)
+  → Renderer.render_sprite / render_batch / render_sprites → FrameBuffer SoA
+  → Renderer.render_shaped_text                            → glyph quads in SoA
+  → Renderer.render_custom                                → queued Canvas callback
+  → Renderer.flush_all                                    → passes/state/native UBR
 ```
 
+`SceneUnit` has no `render_submit` hook. Attach renderer nodes to its root,
+or submit app-level work from `App.update(dt)` before `flush_all`.
+Reusable shapes use cached `canvas.create_*` textures and the sprite path;
+dynamic/debug geometry uses `render_custom(draw_func=lambda canvas:
+canvas.draw_*())`. The former primitive submit methods are removed.
+
 There is no `RenderPipeline` enum or immediate callback scheduler. `DrawScope`
-is an unrestricted Canvas helper; lifecycle control remains with the caller.
+is a helper owned by a renderer; direct Canvas lifecycle control remains with
+the caller.
+
+## Resource handles and ownership
+
+The contracts in `backends.ports.handler` expose neutral size, region, and
+identity information, never raw native structs. Concrete raylib handles
+`Image`, `Texture2D`, `RenderTexture`, `Shader`, `Font`, and `StreamingTexture`
+are defined in `backends/integrations/raylib/handler.py`. Their `raw_*` fields
+are for adapter implementation only.
+
+- `Assets.get_asset(id)` / `Assets[id]` returns a texture handle directly.
+  `texture_id` is a logical string ID; `source_rect` and `parent_id` describe
+  its region and owning cache entry. There is no `get_texture_data(...).texture`.
+- The batch adapter's `texture_id(handle)` extracts the numeric GPU identifier
+  used by the FrameBuffer/native runs. Core must not read `raw_texture.id`.
+- `Assets.store_texture` transfers ownership of a standalone root texture
+  (including a baked shape). Resolve its new handle from the assigned asset ID.
+- `render_target.texture`, `font.texture`, and `stream.texture` are borrowed
+  attachments. Never adopt them into `Assets` or unload them separately.
+- Reloading, unloading, or atlas packing invalidates captured asset handles.
+  Resolve the logical ID again; keep owners alive until queued draws finish.
+- Shutdown releases scene/app resources and services, then assets and the
+  renderer/native batch, before closing the window.
 
 ## Known boundary caveats
 
@@ -108,10 +148,14 @@ is an unrestricted Canvas helper; lifecycle control remains with the caller.
   the configured renderer abstraction rather than a separate RT protocol.
 - Some public-looking deep-module types are not re-exported. Treat facade
   `__all__` lists as the stability boundary.
+- `Input` maps keyboard actions only; `Gamepad` is separate. Keyboard events
+  require `Input(emit_to_bus=True)` and an already registered `EventBus`.
 - Input services do not automatically poll themselves on fixed steps; apps
   using deferred input events must poll before the early EventBus dispatch.
 
 ## Source map
+
+All paths below are relative to `packages/plyunit/`.
 
 | Area | Current path |
 | --- | --- |
@@ -120,17 +164,20 @@ is an unrestricted Canvas helper; lifecycle control remains with the caller.
 | Events | `src/plyunit/events/` |
 | Renderer | `src/plyunit/rendering/` |
 | Services | `src/plyunit/services/` |
-| Assets/audio | `src/plyunit/assets/`, `src/plyunit/audio/` |
+| Assets/audio data | `src/plyunit/services/assets/`, `src/plyunit/services/audio/` |
+| Neutral text/shader helpers | `src/plyunit/services/text.py`, `src/plyunit/services/shaders.py` |
 | Tilemap | `src/plyunit/tilemap/` |
-| Backend protocols | `src/plyunit/backends/interfaces/` |
+| Backend contracts | `src/plyunit/backends/ports/` |
 | Raylib adapters | `src/plyunit/backends/integrations/raylib/` |
+| Raylib resource handles | `src/plyunit/backends/integrations/raylib/handler.py` |
 | Pymunk adapter | `src/plyunit/backends/physics/pymunk/` |
-| Composition root | `src/plyunit/backends/integrations/_bootstrap.py` |
+| Composition root | `src/plyunit/_bootstrap.py` |
 
 ## Audit conclusion
 
-The main architecture follows dependency inversion for host I/O, rendering,
-input, audio, and assets. The principal intentional concrete edges are the
-pymunk implementation package, native UBR requirement, and tilemap's use of
-the configured renderer Canvas. Current user documentation should use facade
-exports and must not reference removed backend factories or renderer facades.
+The architectural contract is ports-only dependencies for neutral code,
+adapter-owned native resources, and backend selection at composition/facade
+boundaries. `packages/plyunit/tests/common/test_import_boundaries.py` guards
+these imports (including typing imports) and checks that resource ports expose
+no raw fields or native constructors. The native UBR requirement is intentional;
+it is not a reason to add a Python draw fallback.

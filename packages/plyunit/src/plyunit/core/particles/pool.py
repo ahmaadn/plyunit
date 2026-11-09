@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from plyunit.backends.ports.handler import Texture2DHandle
+    from plyunit.backends.ports.renderer import ICanvas2D
 
 _DEFAULT_INITIAL = 512
 """Default initial capacity for :class:`ParticlePool`."""
@@ -31,8 +35,8 @@ class Particle:
         rotation: Initial rotation in degrees.
         angular_velocity: Rotation speed (degrees/second).
         tint: RGBA color 0-255.
-        texture: Backend texture object (None = circle).
-        source_rect: Source rectangle ``(x, y, w, h)`` of the texture (None = full).
+        texture: Borrowed texture handle (``None`` draws a circle).
+        source_rect: Source region override, or ``None`` for the handle's region.
     """
 
     position: tuple[float, float]
@@ -43,7 +47,7 @@ class Particle:
     rotation: float = 0.0
     angular_velocity: float = 0.0
     tint: tuple[int, int, int, int] = (255, 255, 255, 255)
-    texture: object | None = None
+    texture: Texture2DHandle | None = None
     source_rect: tuple[float, float, float, float] | None = None
 
 
@@ -297,8 +301,8 @@ class ParticlePool:
         """Submit the batch of alive particles to the renderer.
 
         Particles with a ``texture`` are sent via ``render_sprite`` and
-        grouped by texture ID; particles without a texture are sent as
-        ``render_circles``.
+        grouped by handle identity. Untextured particles use a queued canvas
+        callback with a snapshot of the current circle geometry.
 
         Args:
             **kwargs: Extra parameters forwarded to the renderer.
@@ -331,9 +335,16 @@ class ParticlePool:
                 radii.append(float(sz[ii]))
                 t = tint[ii]
                 colors.append((int(t[0]), int(t[1]), int(t[2]), int(t[3])))
-            renderer.render_circles(
-                centers=centers, radii=radii, colors=colors, **kwargs
-            )
+            circle_centers = tuple(centers)
+            circle_radii = tuple(radii)
+            circle_colors = tuple(colors)
+
+            def draw_circles(canvas: ICanvas2D) -> None:
+                canvas.draw_circle_batch(
+                    centers=circle_centers, radii=circle_radii, colors=circle_colors
+                )
+
+            renderer.render_custom(draw_func=draw_circles, **kwargs)
 
         if tex_idx.size == 0:
             return
@@ -345,7 +356,7 @@ class ParticlePool:
             tex = textures[ii]
             if tex is None:
                 continue
-            tid = int(tex.id)
+            tid = id(tex)
             bucket = groups.get(tid)
             if bucket is None:
                 groups[tid] = [ii]

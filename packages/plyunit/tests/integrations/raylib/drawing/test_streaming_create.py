@@ -4,11 +4,20 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.streaming_texture as stream_mod
-from plyunit.backends.integrations.raylib.drawing.streaming_texture import (
+from plyunit.backends.integrations.raylib.handler import Texture2D
+import plyunit.backends.integrations.raylib.renderer.streaming_texture as stream_mod
+from plyunit.backends.integrations.raylib.renderer.streaming_texture import (
     create_streaming_texture,
     destroy_streaming_texture,
 )
+
+
+@pytest.fixture(autouse=True)
+def streaming_gl_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate GL state and generated buffer names from real FFI calls."""
+    monkeypatch.setattr(stream_mod, "_initialized", True)
+    monkeypatch.setattr(stream_mod, "get_gl_integer", lambda parameter: 0)
+    monkeypatch.setattr(stream_mod, "new_uint_buffer", lambda size, values=None: list(values) if values is not None else [0] * size)
 
 
 def test_create_streaming_texture_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -82,8 +91,8 @@ def test_create_streaming_texture_happy_path(monkeypatch: pytest.MonkeyPatch) ->
     assert st.width == 8
     assert st.height == 4
     assert st.channels == 4
-    assert st._buffer_size == 8 * 4 * 4
-    assert st._pbo_ids == [10, 11]
+    assert st.buffer_size == 8 * 4 * 4
+    assert st.pbo_ids == [10, 11]
     assert created_pbo == [10, 11]
 
     # destroy without real GL
@@ -100,7 +109,7 @@ def test_create_streaming_texture_happy_path(monkeypatch: pytest.MonkeyPatch) ->
         stream_mod.pr, "unload_texture", lambda t: binds.append(("unload", t.id)), raising=False
     )
     destroy_streaming_texture(st)
-    assert st._alive is False
+    assert st.alive is False
     assert ("delete", 2) in binds
     assert ("unload", 42) in binds
 
@@ -139,4 +148,4 @@ def test_create_streaming_rgb_channels(monkeypatch: pytest.MonkeyPatch) -> None:
     st = create_streaming_texture(2, 2, channels=3)
     assert st is not None
     assert st.channels == 3
-    assert st._buffer_size == 12
+    assert st.buffer_size == 12

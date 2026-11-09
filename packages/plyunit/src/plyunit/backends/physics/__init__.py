@@ -52,7 +52,6 @@ if TYPE_CHECKING:
         PolygonShape as PolygonShape,
         SegmentShape as SegmentShape,
         StaticBody as StaticBody,
-        build_physics_service as build_physics_service,
     )
 
 
@@ -78,7 +77,6 @@ __all__ = (
     "PolygonShape",
     "SegmentShape",
     "StaticBody",
-    "build_physics_service",
 )
 
 _SUBS = {
@@ -107,8 +105,8 @@ def __getattr__(name: str):
     Raises:
         AttributeError: If the attribute is not found in the bundle or a submodule.
     """
-    if name.startswith("__") and name.endswith("__"):
-        raise AttributeError(name)
+    if name not in __all__:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
     # 1. Try the bundle root first.
     try:
         value = getattr(_get_active_backend(), name)

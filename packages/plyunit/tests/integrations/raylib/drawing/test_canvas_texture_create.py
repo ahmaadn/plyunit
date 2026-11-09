@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.canvas as canvas_mod
-from plyunit.backends.integrations.raylib.drawing.canvas import (
+import plyunit.backends.integrations.raylib.renderer.canvas as canvas_mod
+from plyunit.backends.integrations.raylib.renderer.canvas import (
     create_circle,
     create_circles,
     create_line,
@@ -107,6 +107,12 @@ class FakeBakePr:
     def draw_rectangle_rec(self, rect, color):
         self.calls.append(("draw_rect", rect, color))
 
+    def draw_circle_sector(self, *args):
+        self.calls.append(("sector", args))
+
+    def draw_ring(self, *args):
+        self.calls.append(("ring", args))
+
     def draw_circle_v(self, center, radius, color):
         self.calls.append(("draw_circle", center, radius, color))
 
@@ -155,7 +161,7 @@ def test_create_rect_bakes_standalone_texture(fake_pr: FakeBakePr) -> None:
     # Hasil: readback -> flip -> upload mandiri; RT dan image dibebaskan.
     assert ("readback", 101) in fake_pr.calls
     assert ("flip", 20, 10) in fake_pr.calls
-    assert texture.id > 500
+    assert texture.raw_texture.id > 500
     assert texture.width == 20 and texture.height == 10
     assert ("image_unload", 20, 10) in fake_pr.calls
     assert ("rt_unload", 101) in fake_pr.calls
@@ -298,7 +304,7 @@ def test_create_triangle_outline_pads_half_thickness(
 
 
 def test_create_circle_sector_and_border_paths(fake_pr: FakeBakePr) -> None:
-    fake_pr.draw_ring = lambda *a: fake_pr.calls.append(("ring", a))
+
     create_circle(
         radius=6.0,
         border_color=(0, 0, 0, 255),

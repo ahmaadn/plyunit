@@ -18,6 +18,13 @@ import plyunit as pu
 class ImGuiApp(pu.App):
     def on_load(self) -> None:
         self._counter = 0
+        self.assets.store_texture(
+            "imgui_world_rect",
+            self.renderer.canvas.create_rect(
+                rect=(0, 0, 160, 100), color=(70, 110, 180, 255)
+            ),
+        )
+        self._world_texture = self.assets.get_asset("imgui_world_rect")
         imgui_service = self.one("@ImGui", scope="global")
         imgui_service.add_draw(self._draw_ui)
 
@@ -29,15 +36,15 @@ class ImGuiApp(pu.App):
     def update(self, dt: float) -> None:
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((245, 245, 245, 255))
+        self.window.clear_background((20, 22, 30, 255))
         self.scene_manager.render(self.renderer)
 
         # Queued world content (ImGui is separate, immediate, post-pass).
-        self.renderer.render_rect(
+        self.renderer.render_sprite(
             z=0,
             layer=pu.Layer.WORLD,
-            rect=(80, 80, 160, 100),
-            color=(70, 110, 180, 255),
+            texture=self._world_texture,
+            pos=(80, 80),
         )
 
         self.renderer.flush_all()
@@ -68,7 +75,6 @@ def main() -> None:
             title="ImGui Example",
             window_width=960,
             window_height=600,
-            background_color=(20, 22, 30, 255),
             imgui=pu.ImGuiConfig(enabled=True),
         ),
     )

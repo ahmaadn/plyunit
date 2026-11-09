@@ -85,7 +85,7 @@ def _is_full_tile_box(shape: PhysicsShape | None, tile_size: int) -> bool:
     """
     if shape is None:
         return False
-    if shape.get("kind", "box") != "box":
+    if shape["kind"] != "box":
         return False
     ox, oy = shape.get("offset", (0.0, 0.0))
     sw, sh = shape.get("size", (float(tile_size), float(tile_size)))
@@ -148,7 +148,7 @@ def _make_per_tile_body(
     Returns:
         BakedStaticBody: The per-tile static body.
     """
-    shape = physics.get("shape")
+    shape: PhysicsShape | None = physics.get("shape")
     if shape is None:
         # No explicit shape → fall back to an empty box.
         shape = {"kind": "box", "offset": (0.0, 0.0), "size": (0.0, 0.0)}

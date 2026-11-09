@@ -2,7 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.canvas as canvas_module
+import plyunit.backends.integrations.raylib.renderer.canvas as canvas_module
 from plyunit.rendering.enum import BlendMode, Layer
 from plyunit.rendering.renderer import Renderer
 
@@ -121,17 +121,17 @@ def test_renderer_y_sort(mock_canvas):
 
     Renderer.enable_y_sort_layer(Layer.WORLD, enabled=True)
 
-    # Push items with different Y origins
-    renderer.render_circle(z=10, layer=Layer.WORLD, center=(0, 0), radius=1.0, y_sort_origin=50.0)
-    renderer.render_circle(z=0, layer=Layer.WORLD, center=(0, 0), radius=1.0, y_sort_origin=20.0)
-    renderer.render_circle(z=5, layer=Layer.WORLD, center=(0, 0), radius=1.0, y_sort_origin=80.0)
-
-    # Flush should sort them by y_sort_origin: 20.0, 50.0, 80.0
-    renderer.flush()
-    # If it flushes, the items are removed. We verify by the order they were processed?
-    # Since we can't easily intercept the exact item sorted order without more complex mocks,
-    # we just ensure it doesn't crash.
-    Renderer.enable_y_sort_layer(Layer.WORLD, enabled=False)
+    # Submission index breaks ties; Y position takes precedence over z.
+    for z, y in ((10, 50.0), (0, 20.0), (5, 80.0)):
+        renderer.render_custom(
+            z=z, layer=Layer.WORLD, y_sort_origin=y,
+            draw_func=lambda canvas, y=y: canvas.draw_circle(center=(0, y), radius=1.0),
+        )
+    try:
+        renderer.flush()
+        assert [kw["center"][1] for kw in mock_canvas["draw_circle"]] == [20.0, 50.0, 80.0]
+    finally:
+        Renderer.enable_y_sort_layer(Layer.WORLD, enabled=False)
 
 def test_renderer_flush_all_passes_with_camera_and_target(mock_canvas):
     # pyrefly: ignore [bad-argument-type]
@@ -151,8 +151,11 @@ def test_renderer_flush_all_passes_with_camera_and_target(mock_canvas):
         order=1
     )
 
-    renderer.render_circle(z=0, layer=Layer.WORLD, center=(0, 0), radius=1.0, pass_name="custom")
-    renderer.render_circle(z=0, layer=Layer.WORLD, center=(0, 0), radius=1.0, pass_name="world")
+    for pass_name in ("custom", "world"):
+        renderer.render_custom(
+            z=0, layer=Layer.WORLD, pass_name=pass_name,
+            draw_func=lambda canvas: canvas.draw_circle(center=(0, 0), radius=1.0),
+        )
 
     renderer.flush_all()
 
@@ -170,7 +173,7 @@ def test_renderer_error_during_flush_all(mock_canvas):
 
     def bad_custom_draw(canvas):
         # Attempt to submit during flush_all.
-        renderer.render_circle(z=0, layer=Layer.WORLD, center=(0, 0), radius=1.0)
+        renderer.render_custom(draw_func=lambda canvas: None)
 
     renderer.render_custom(z=0, layer=Layer.WORLD, draw_func=bad_custom_draw)
 
@@ -184,22 +187,20 @@ def test_renderer_item_scissor_and_blend_mode(mock_canvas):
     shader = SimpleNamespace()
 
     # Item with specific state
-    renderer.render_circle(
+    renderer.render_custom(
         z=0,
         layer=Layer.WORLD,
-        center=(0, 0),
-        radius=1.0,
+        draw_func=lambda canvas: canvas.draw_circle(center=(0, 0), radius=1.0),
         scissor=(0, 0, 50, 50),
         blend_mode=BlendMode.ADDITIVE,
         shader=shader,
     )
 
     # Second item with different state to trigger transitions
-    renderer.render_circle(
+    renderer.render_custom(
         z=1,
         layer=Layer.WORLD,
-        center=(0, 0),
-        radius=1.0,
+        draw_func=lambda canvas: canvas.draw_circle(center=(0, 0), radius=1.0),
         scissor=(10, 10, 40, 40),
         blend_mode=BlendMode.MULTIPLIED,
         shader=None,
@@ -220,11 +221,10 @@ def test_renderer_viewport_scissor_intersection(mock_canvas):
 
     renderer.create_pass("clip_pass", viewport_scissor=(0, 0, 100, 100))
 
-    renderer.render_circle(
+    renderer.render_custom(
         z=0,
         layer=Layer.WORLD,
-        center=(0, 0),
-        radius=1.0,
+        draw_func=lambda canvas: canvas.draw_circle(center=(0, 0), radius=1.0),
         pass_name="clip_pass",
         scissor=(50, 50, 100, 100),
     )

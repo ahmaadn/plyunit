@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "name": "test_assets",
+  "assets_root": "/data",
+  "defaults": {
+    "tile_size": [
+      16,
+      16
+    ],
+    "chunk_size": 16,
+    "encoding": "base64_zlib",
+    "background_color": [
+      20,
+      20,
+      30,
+      255
+    ]
+  },
+  "exclude_folders": [],
+  "exclude_override": true
+}

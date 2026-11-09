@@ -1,76 +1,77 @@
-"""raylib canvas render-texture functions (tilemap bake), without a GPU."""
-
-from __future__ import annotations
+"""Render-target and sampling operations using concrete raylib handles."""
 
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.canvas as canvas_mod
-from plyunit.backends.integrations.raylib.drawing.canvas import (
-    clear_transparent,
-    draw_texture_region,
-    gen_mipmaps,
-    load_render_texture,
-    set_texture_filter,
-    unload_render_texture,
-)
+from plyunit._enums import TextureFilter
+from plyunit.backends.integrations.raylib.handler import RenderTexture, Texture2D
+from plyunit.backends.integrations.raylib.renderer import canvas
 
 
-def test_canvas_render_texture_ops(monkeypatch: pytest.MonkeyPatch):
-    calls: list[tuple] = []
-    tex = SimpleNamespace(id="tex")
-    rt = SimpleNamespace(texture=tex)
+@pytest.fixture
+def backend(monkeypatch):
+    raw_texture = SimpleNamespace(id=12, width=10, height=20, format=7)
+    raw_target = SimpleNamespace(id=4, texture=raw_texture)
     fake = SimpleNamespace(
-        load_render_texture=lambda w, h: calls.append(("load", w, h)) or rt,
-        unload_render_texture=lambda t: calls.append(("unload", t)),
-        begin_texture_mode=lambda t: calls.append(("begin", t)),
-        end_texture_mode=lambda: calls.append(("end",)),
-        clear_background=lambda c: calls.append(("clear", c)),
-        draw_texture_pro=lambda *a: calls.append(("draw", a[0])),
-        gen_texture_mipmaps=lambda t: calls.append(("mipmap", t)),
-        set_texture_filter=lambda t, f: calls.append(("filter", t, f)),
-        TextureFilter=SimpleNamespace(
-            TEXTURE_FILTER_TRILINEAR="tri",
-            TEXTURE_FILTER_POINT="point",
-        ),
-        Rectangle=lambda x, y, w, h: (x, y, w, h),
-        Vector2=lambda x, y: (x, y),
+        load_render_texture=Mock(return_value=raw_target),
+        unload_render_texture=Mock(),
+        begin_texture_mode=Mock(),
+        end_texture_mode=Mock(),
+        draw_texture_pro=Mock(),
+        gen_texture_mipmaps=Mock(),
+        set_texture_filter=Mock(),
+        TEXTURE_FILTER_POINT=0,
+        TEXTURE_FILTER_BILINEAR=1,
+        TEXTURE_FILTER_TRILINEAR=2,
+        Rectangle=lambda *values: values,
+        Vector2=lambda *values: values,
         WHITE=(255, 255, 255, 255),
-        BLANK=(0, 0, 0, 0),
     )
-    monkeypatch.setattr(canvas_mod, "pr", fake)
-
-    assert load_render_texture(10, 20) is rt
-    canvas_mod.begin_texture_mode(rt)
-    clear_transparent()
-    draw_texture_region("tex", (0, 0, 8, 8), (1, 2, 8, 8))
-    canvas_mod.end_texture_mode()
-    gen_mipmaps(rt)
-    set_texture_filter(rt, "trilinear")
-    set_texture_filter(rt, "point")
-    unload_render_texture(rt)
-
-    assert ("load", 10, 20) in calls
-    assert ("clear", fake.BLANK) in calls
-    assert ("draw", "tex") in calls
-    assert ("mipmap", tex) in calls
-    assert ("filter", tex, "tri") in calls
-    assert ("filter", tex, "point") in calls
-    assert ("unload", rt) in calls
+    monkeypatch.setattr(canvas, "pr", fake)
+    monkeypatch.setattr(canvas, "rl", SimpleNamespace(
+        TEXTURE_FILTER_POINT=0,
+        TEXTURE_FILTER_BILINEAR=1,
+        TEXTURE_FILTER_TRILINEAR=2,
+    ))
+    return fake, raw_target
 
 
-def test_canvas_render_texture_noop_without_texture(
-    monkeypatch: pytest.MonkeyPatch,
-):
-    def _boom(*a):
-        raise AssertionError("must not touch pr")
-
-    fake = SimpleNamespace(
-        gen_texture_mipmaps=_boom,
-        set_texture_filter=_boom,
+def test_render_target_operations_unwrap_only_inside_adapter(backend):
+    fake, raw_target = backend
+    target = canvas.load_render_texture(10, 20)
+    assert isinstance(target, RenderTexture)
+    assert target.raw_render_texture is raw_target
+    assert target.texture is target.texture
+    assert isinstance(target.texture, Texture2D)
+    canvas.begin_texture_mode(target)
+    canvas.draw_texture_region(target.texture, (0, 0, 8, 8), (1, 2, 8, 8))
+    canvas.end_texture_mode()
+    canvas.gen_mipmaps(target)
+    canvas.unload_render_texture(target)
+    fake.begin_texture_mode.assert_called_once_with(raw_target)
+    fake.draw_texture_pro.assert_called_once_with(
+        raw_target.texture, (0, 0, 8, 8), (1, 2, 8, 8), (0, 0), 0.0, fake.WHITE
     )
-    monkeypatch.setattr(canvas_mod, "pr", fake)
-    # A target without a ``texture`` attribute is a no-op.
-    gen_mipmaps(SimpleNamespace())
-    set_texture_filter(SimpleNamespace(), "point")
+    fake.gen_texture_mipmaps.assert_called_once_with(raw_target.texture)
+    fake.unload_render_texture.assert_called_once_with(raw_target)
+
+
+@pytest.mark.parametrize(
+    ("filter_mode", "expected"),
+    [(TextureFilter.NEAREST, 0), (TextureFilter.LINEAR, 1), (TextureFilter.TRILINEAR, 2)],
+)
+@pytest.mark.parametrize("use_target", [True, False])
+def test_sampling_modes_use_explicit_enum_mapping(backend, filter_mode, expected, use_target):
+    fake, raw = backend
+    target = RenderTexture(raw)
+    canvas.set_texture_filter(target if use_target else target.texture, filter_mode)
+    fake.set_texture_filter.assert_called_once_with(raw.texture, expected)
+
+
+def test_sampling_does_not_accept_removed_string_modes(backend):
+    fake, raw = backend
+    with pytest.raises((ValueError, TypeError, KeyError)):
+        canvas.set_texture_filter(RenderTexture(raw), "point")
+    fake.set_texture_filter.assert_not_called()

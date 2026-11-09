@@ -15,7 +15,7 @@ from plyunit.core.components.component import Component
 from plyunit.rendering.enum import BlendMode, Layer
 
 if TYPE_CHECKING:
-    from plyunit.backends.integrations.raylib.drawing import Canvas
+    from plyunit.backends.ports.renderer import ICanvas2D
     from plyunit.core.components.physics import PhysicsShape
     from plyunit.rendering.render_state import RenderContext
     from plyunit.rendering.renderer import Renderer
@@ -159,8 +159,8 @@ class PhysicsDebugDraw(Component):
         self._debug_shapes_submitted += count
         return True
 
-    def draw(self, canvas: Canvas) -> None:
-        """Legacy custom-draw hook kept as a safe no-op for old callers."""
+    def draw(self, canvas: ICanvas2D) -> None:
+        """Leave drawing to the queued debug primitives in ``render_submit``."""
         _ = canvas
 
     def _resolve_physics_service(self) -> None:
@@ -375,33 +375,49 @@ class PhysicsDebugDraw(Component):
 
             if isinstance(shape, CircleShape):
                 fill = (color[0], color[1], color[2], 40) if sensor_fill else None
-                renderer.render_circle(
-                    center=(shape_x, shape_y),
-                    radius=shape.radius,
-                    color=fill,
-                    border_color=color,
-                    thickness=2.0,
+                renderer.render_custom(
+                    draw_func=lambda canvas, center=(shape_x, shape_y), radius=shape.radius, fill=fill: (
+                        canvas.draw_circle(
+                            center=center,
+                            radius=radius,
+                            color=fill,
+                            border_color=color,
+                            outline_only=not sensor_fill,
+                            thickness=2.0,
+                        )
+                    ),
                     **self._debug_state(),
                 )
                 end_x = shape_x + math.cos(math.radians(angle_deg)) * shape.radius
                 end_y = shape_y + math.sin(math.radians(angle_deg)) * shape.radius
-                renderer.render_line(
-                    start=(shape_x, shape_y),
-                    end=(end_x, end_y),
-                    color=color,
-                    thickness=1.5,
+                renderer.render_custom(
+                    draw_func=lambda canvas, start=(shape_x, shape_y), end=(end_x, end_y): (
+                        canvas.draw_line(
+                            start=start,
+                            end=end,
+                            color=color,
+                            thickness=1.5,
+                        )
+                    ),
                     **self._debug_state(),
                 )
                 continue
 
             if isinstance(shape, BoxShape):
-                renderer.render_rect(
-                    rect=(shape_x, shape_y, shape.width, shape.height),
-                    color=(color[0], color[1], color[2], 40) if sensor_fill else None,
-                    border_color=color,
-                    thickness=2.0,
-                    rotation=angle_deg,
-                    origin=(shape.width / 2.0, shape.height / 2.0),
+                renderer.render_custom(
+                    draw_func=lambda canvas, rect=(shape_x, shape_y, shape.width, shape.height), origin=(shape.width / 2.0, shape.height / 2.0): (
+                        canvas.draw_rectangle(
+                            rect=rect,
+                            color=(color[0], color[1], color[2], 40)
+                            if sensor_fill
+                            else None,
+                            border_color=color,
+                            outline_only=not sensor_fill,
+                            thickness=2.0,
+                            rotation=angle_deg,
+                            origin=origin,
+                        )
+                    ),
                     **self._debug_state(),
                 )
                 continue
@@ -421,11 +437,15 @@ class PhysicsDebugDraw(Component):
                     oy + shape.b[1],
                     angle_deg,
                 )
-                renderer.render_line(
-                    start=start,
-                    end=end,
-                    color=color,
-                    thickness=max(2.0, shape.radius * 2.0),
+                renderer.render_custom(
+                    draw_func=lambda canvas, start=start, end=end, thickness=max(2.0, shape.radius * 2.0): (
+                        canvas.draw_line(
+                            start=start,
+                            end=end,
+                            color=color,
+                            thickness=thickness,
+                        )
+                    ),
                     **self._debug_state(),
                 )
                 continue
@@ -448,11 +468,13 @@ class PhysicsDebugDraw(Component):
                         oy + end_local[1],
                         angle_deg,
                     )
-                    renderer.render_line(
-                        start=start,
-                        end=end,
-                        color=color,
-                        thickness=2.0,
+                    renderer.render_custom(
+                        draw_func=lambda canvas, start=start, end=end: canvas.draw_line(
+                            start=start,
+                            end=end,
+                            color=color,
+                            thickness=2.0,
+                        ),
                         **self._debug_state(),
                     )
 
@@ -473,10 +495,15 @@ class PhysicsDebugDraw(Component):
             right = float(max(bb.left, bb.right))
             top = float(min(bb.top, bb.bottom))
             bottom = float(max(bb.top, bb.bottom))
-            renderer.render_rect(
-                rect=(left, top, right - left, bottom - top),
-                border_color=color,
-                thickness=1.0,
+            renderer.render_custom(
+                draw_func=lambda canvas, rect=(left, top, right - left, bottom - top): (
+                    canvas.draw_rectangle(
+                        rect=rect,
+                        border_color=color,
+                        outline_only=True,
+                        thickness=1.0,
+                    )
+                ),
                 **self._debug_state(),
             )
 
@@ -518,10 +545,12 @@ class PhysicsDebugDraw(Component):
                     left, top, right, bottom = view_bb
                     if px < left or px > right or py < top or py > bottom:
                         continue
-                renderer.render_circle(
-                    center=(px, py),
-                    radius=3.0,
-                    color=_COLOR_CONTACT,
+                renderer.render_custom(
+                    draw_func=lambda canvas, center=(px, py): canvas.draw_circle(
+                        center=center,
+                        radius=3.0,
+                        color=_COLOR_CONTACT,
+                    ),
                     **self._debug_state(),
                 )
                 submitted += 1

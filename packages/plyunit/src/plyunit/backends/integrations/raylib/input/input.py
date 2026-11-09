@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 import pyray as pr
 
-from plyunit.backends.interfaces import IInput
+from plyunit.backends.ports.input import IInput
 from plyunit.core.units.service_unit import ServiceUnit
 
 if TYPE_CHECKING:

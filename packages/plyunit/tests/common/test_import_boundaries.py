@@ -1,103 +1,83 @@
-"""Architectural guard: domain layers must not import concrete backends at runtime."""
+"""Architectural guards for ports-only dependencies in backend-neutral code."""
 
 from __future__ import annotations
 
 import ast
+from importlib.util import resolve_name
 from pathlib import Path
 
+import pytest
+
 PKG = Path(__file__).resolve().parents[2] / "src" / "plyunit"
-CORE_ROOT = PKG / "core"
-COMPONENTS_ROOT = PKG / "core" / "components"
-ENGINE_ROOTS = [
-    PKG / "core",
-    PKG / "scene",
-    PKG / "rendering",
-    PKG / "audio",
-    PKG / "assets",
-    PKG / "events",
-    PKG / "tilemap",
-    PKG / "services",
-]
-
-# Core may import protocol interfaces; concrete vendor backends are forbidden.
-FORBIDDEN_IN_CORE = (
-    "plyunit.backends.integrations",
-    "plyunit.backends.physics",
-    "plyunit.backends.imgui",
-)
-# Engine domains may import backends.* facades only via selector packages later;
-# concrete vendor packages stay forbidden at runtime.
-FORBIDDEN_IN_ENGINE = (
-    "plyunit.backends.integrations.raylib",
-    "plyunit.backends.physics.pymunk",
-    "plyunit.backends.imgui.raylib",
-)
+DOMAIN_ROOTS = ("core", "events", "rendering", "services", "tilemap", "utils")
+VENDORS = ("pyray", "raylib", "pymunk", "imgui", "imgui_bundle", "OpenGL")
 
 
-def _runtime_imports(path: Path) -> list[str]:
+def _imports(path: Path) -> list[str]:
+    """Resolve absolute, relative, and literal dynamic imports in a module."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    imports: list[str] = []
-
-    class Visitor(ast.NodeVisitor):
-        def __init__(self) -> None:
-            self._in_type_checking = False
-
-        def visit_If(self, node: ast.If) -> None:
-            is_tc = False
-            test = node.test
-            if (
-                (isinstance(test, ast.Name) and test.id == "TYPE_CHECKING")
-                or (
-                    isinstance(test, ast.Attribute)
-                    and isinstance(test.value, ast.Name)
-                    and test.value.id == "typing"
-                    and test.attr == "TYPE_CHECKING"
-                )
-            ):
-                is_tc = True
-            prev = self._in_type_checking
-            if is_tc:
-                self._in_type_checking = True
-            self.generic_visit(node)
-            self._in_type_checking = prev
-
-        def visit_Import(self, node: ast.Import) -> None:
-            if self._in_type_checking:
-                return
-            for alias in node.names:
-                imports.append(alias.name)
-
-        def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
-            if self._in_type_checking:
-                return
-            mod = node.module or ""
-            imports.append(mod)
-
-    Visitor().visit(tree)
-    return imports
+    relative = path.relative_to(PKG.parent).with_suffix("")
+    parts = relative.parts
+    package = ".".join(parts[:-1])
+    result = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            result.extend(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            if node.level:
+                module = resolve_name("." * node.level + module, package)
+            result.append(module)
+            result.extend(module + "." + alias.name for alias in node.names)
+        elif isinstance(node, ast.Call) and node.args:
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else func.attr if isinstance(func, ast.Attribute) else ""
+            if name in {"import_module", "__import__"}:
+                arg = node.args[0]
+                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                    result.append(arg.value)
+    return result
 
 
-def _assert_no_forbidden(root: Path, forbidden: tuple[str, ...]) -> None:
-    offenders: list[str] = []
-    for path in root.rglob("*.py"):
-        if "__pycache__" in path.parts:
-            continue
-        for mod in _runtime_imports(path):
-            for bad in forbidden:
-                if mod == bad or mod.startswith(bad + "."):
-                    offenders.append(f"{path.relative_to(root.parent.parent)}: {mod}")
-    assert not offenders, "Forbidden runtime imports:\n" + "\n".join(offenders)
+def _forbidden(module: str) -> bool:
+    """Reject concrete vendors and backend selectors, including typing imports."""
+    if module.split(".")[0] in VENDORS:
+        return True
+    if module == "plyunit.backends" or module.startswith("plyunit.backends."):
+        return not (module == "plyunit.backends.ports" or module.startswith("plyunit.backends.ports."))
+    return False
 
 
-def test_core_does_not_import_backends() -> None:
-    _assert_no_forbidden(CORE_ROOT, FORBIDDEN_IN_CORE)
-    if COMPONENTS_ROOT.exists():
-        _assert_no_forbidden(COMPONENTS_ROOT, FORBIDDEN_IN_CORE)
+@pytest.mark.parametrize("domain", DOMAIN_ROOTS)
+def test_domain_dependencies_use_ports_only(domain: str) -> None:
+    root = PKG / domain
+    assert root.is_dir(), f"Missing neutral domain: {root}"
+    offenders = [
+        f"{path.relative_to(PKG)}: {module}"
+        for path in root.rglob("*.py")
+        for module in _imports(path)
+        if _forbidden(module)
+    ]
+    assert not offenders, "Concrete backend imports in neutral code:\n" + "\n".join(offenders)
 
 
-def test_engine_domains_do_not_import_concrete_backends() -> None:
-    for root in ENGINE_ROOTS:
-        if root.exists():
-            _assert_no_forbidden(root, FORBIDDEN_IN_ENGINE)
+def test_ports_do_not_import_concrete_backends() -> None:
+    offenders = [
+        f"{path.relative_to(PKG)}: {module}"
+        for path in (PKG / "backends" / "ports").rglob("*.py")
+        for module in _imports(path)
+        if _forbidden(module)
+    ]
+    assert not offenders, "Concrete backend imports in ports:\n" + "\n".join(offenders)
 
 
+def test_resource_ports_do_not_expose_native_objects() -> None:
+    """Native fields and constructors belong to concrete backend handles."""
+    from plyunit.backends.ports import handler
+
+    for name in handler.__all__:
+        handle = getattr(handler, name)
+        if isinstance(handle, type) and name.endswith("Handle"):
+            assert not any(field.startswith("raw_") for field in vars(handle)), name
+            assert "from_raw" not in vars(handle), name
+    assert "locations" not in vars(handler.ShaderHandle)

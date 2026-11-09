@@ -4,16 +4,23 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.gl_ffi as gl_ffi
-import plyunit.backends.integrations.raylib.drawing.streaming_texture as stream_mod
-from plyunit.backends.integrations.raylib.drawing.streaming_texture import (
-    StreamingTexture,
+from plyunit.backends.integrations.raylib.handler import StreamingTexture, Texture2D
+import plyunit.backends.integrations.raylib.renderer.gl_ffi as gl_ffi
+import plyunit.backends.integrations.raylib.renderer.streaming_texture as stream_mod
+from plyunit.backends.integrations.raylib.renderer.streaming_texture import (
     create_streaming_texture,
     destroy_streaming_texture,
     init_streaming,
     is_streaming_available,
     update_streaming_texture,
 )
+
+
+@pytest.fixture(autouse=True)
+def streaming_gl_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Isolate availability and native scalar queries from other GL tests."""
+    monkeypatch.setattr(stream_mod, "_initialized", False)
+    monkeypatch.setattr(stream_mod, "get_gl_integer", lambda parameter: 4 if parameter == stream_mod.GL_UNPACK_ALIGNMENT else 0)
 
 
 def test_create_streaming_rejects_bad_channels() -> None:
@@ -30,9 +37,9 @@ def test_update_size_mismatch(monkeypatch: pytest.MonkeyPatch) -> None:
     stream_mod._initialized = True
     monkeypatch.setattr(stream_mod, "flush_render_batch", lambda: None)
 
-    tex = SimpleNamespace(id=1, width=2, height=2)
-    st = StreamingTexture(texture=tex, width=2, height=2, channels=4)
-    assert st._buffer_size == 16
+    tex = Texture2D.from_raw(SimpleNamespace(id=1, width=2, height=2, format=7))
+    st = StreamingTexture(texture=tex, width=2, height=2, channels=4, pbo_ids=[10, 11])
+    assert st.buffer_size == 16
     assert update_streaming_texture(st, b"\x00" * 8) is False
 
 
@@ -47,14 +54,13 @@ def test_update_map_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(stream_mod, "get_gl_func", fake_get)
     monkeypatch.setattr(stream_mod, "flush_render_batch", lambda: None)
 
-    tex = SimpleNamespace(id=7, width=2, height=2)
+    tex = Texture2D.from_raw(SimpleNamespace(id=7, width=2, height=2, format=7))
     st = StreamingTexture(
         texture=tex,
         width=2,
         height=2,
         channels=4,
-        _pbo_ids=[10, 11],
-        _current_pbo=0,
+        pbo_ids=[10, 11],
     )
     ok = update_streaming_texture(st, b"\x00" * 16)
     assert ok is False
@@ -69,6 +75,8 @@ def test_update_success_swaps_pbo(monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_get(name: str, signature: str):
         if name == "glMapBuffer":
             return lambda *a: mapped
+        if name == "glUnmapBuffer":
+            return lambda *a: 1
         return lambda *a: None
 
     monkeypatch.setattr(stream_mod, "get_gl_func", fake_get)
@@ -83,18 +91,17 @@ def test_update_success_swaps_pbo(monkeypatch: pytest.MonkeyPatch) -> None:
         raising=False,
     )
 
-    tex = SimpleNamespace(id=3, width=2, height=2)
+    tex = Texture2D.from_raw(SimpleNamespace(id=3, width=2, height=2, format=7))
     st = StreamingTexture(
         texture=tex,
         width=2,
         height=2,
         channels=4,
-        _pbo_ids=[100, 101],
-        _current_pbo=0,
+        pbo_ids=[100, 101],
     )
     payload = b"\x01" * 16
     assert st.update(payload) is True
-    assert st._current_pbo == 1
+    assert st.current_pbo == 1
     assert moves and moves[0][1] == 16
 
 
@@ -124,14 +131,14 @@ def test_destroy_marks_dead(monkeypatch: pytest.MonkeyPatch) -> None:
         raising=False,
     )
 
-    tex = SimpleNamespace(id=5)
+    tex = Texture2D.from_raw(SimpleNamespace(id=5, width=4, height=4, format=7))
     st = StreamingTexture(
-        texture=tex, width=4, height=4, channels=4, _pbo_ids=[1, 2]
+        texture=tex, width=4, height=4, channels=4, pbo_ids=[1, 2]
     )
     destroy_streaming_texture(st)
-    assert st._alive is False
+    assert st.alive is False
     assert deleted == [2]
-    assert unloaded == [tex]
+    assert unloaded == [tex.raw_texture]
     destroy_streaming_texture(st)
     assert deleted == [2]
 
@@ -147,7 +154,7 @@ def test_init_streaming_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         gl_ffi.pr,
         "ffi",
-        SimpleNamespace(NULL=None, cast=lambda signature, addr: lambda *a, **k: None),
+        SimpleNamespace(NULL=None, cast=lambda signature, addr: 1234 if signature == "uintptr_t" else lambda *a, **k: None),
         raising=False,
     )
     assert init_streaming() is True
@@ -158,8 +165,7 @@ def test_init_streaming_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_canvas_streaming_wrappers(monkeypatch: pytest.MonkeyPatch) -> None:
-    import plyunit.backends.integrations.raylib.drawing.canvas as Canvas
-    import plyunit.backends.integrations.raylib.drawing.canvas as Canvas
+    from plyunit.backends.integrations.raylib.renderer import canvas as Canvas
 
     calls: list[str] = []
     monkeypatch.setattr(

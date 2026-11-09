@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.gl_ffi as gl_ffi
+import plyunit.backends.integrations.raylib.renderer.gl_ffi as gl_ffi
 
 
 def test_get_gl_func_glfw_fallback(monkeypatch: pytest.MonkeyPatch):
@@ -24,7 +24,7 @@ def test_get_gl_func_glfw_fallback(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(
         gl_ffi.pr,
         "ffi",
-        SimpleNamespace(NULL=None, cast=lambda s, a: lambda *x: "ok"),
+        SimpleNamespace(NULL=None, cast=lambda s, a: 1234 if s == "uintptr_t" else lambda *x: "ok"),
         raising=False,
     )
     fn = gl_ffi.get_gl_func("glFoo", "void(*)()")

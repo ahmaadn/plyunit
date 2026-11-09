@@ -11,6 +11,7 @@ import pyray as pr
 
 import plyunit as pu
 from benchmarks.report_paths import resolve_report_path, write_text_report
+from plyunit.backends.ports.handler import Texture2DHandle
 from plyunit.rendering import Layer
 
 PROFILE_PASS_RATIO = {
@@ -104,9 +105,12 @@ class BodyRecord:
 
 
 class BenchmarkBodyRenderer(pu.Component):
-    def __init__(self, record: BodyRecord) -> None:
+    def __init__(
+        self, record: BodyRecord, texture: Texture2DHandle | None = None
+    ) -> None:
         super().__init__(name="BenchmarkBodyRenderer")
         self.record = record
+        self.texture = texture
 
     def render_submit(self, renderer, context=None) -> None:
         _ = context
@@ -115,23 +119,40 @@ class BenchmarkBodyRenderer(pu.Component):
             return
         world = node.world_transform_lerp()
         x, y = world.position
-        if self.record.shape == "circle":
-            renderer.render_circle(
+        if self.texture is not None:
+            renderer.render_sprite(
+                texture=self.texture,
+                dest=(x, y, self.record.width, self.record.height),
+                origin=(self.record.width * 0.5, self.record.height * 0.5),
+                rotation=world.rotation,
+                tint=self.record.color,
+                layer=Layer.ENTITIES,
+            )
+        elif self.record.shape == "circle":
+            renderer.render_custom(
                 z=0,
                 layer=Layer.ENTITIES,
-                center=(x, y),
-                radius=self.record.radius,
-                color=self.record.color,
+                draw_func=lambda canvas, radius=self.record.radius, color=self.record.color: (
+                    canvas.draw_circle(
+                        center=(x, y),
+                        radius=radius,
+                        color=color,
+                    )
+                ),
             )
-            return
-        renderer.render_rect(
-            z=0,
-            layer=Layer.ENTITIES,
-            rect=(x, y, self.record.width, self.record.height),
-            origin=(self.record.width * 0.5, self.record.height * 0.5),
-            rotation=world.rotation,
-            color=self.record.color,
-        )
+        else:
+            renderer.render_custom(
+                z=0,
+                layer=Layer.ENTITIES,
+                draw_func=lambda canvas, rect=(x, y, self.record.width, self.record.height), origin=(self.record.width * 0.5, self.record.height * 0.5), rotation=world.rotation, color=self.record.color: (
+                    canvas.draw_rectangle(
+                        rect=rect,
+                        origin=origin,
+                        rotation=rotation,
+                        color=color,
+                    )
+                ),
+            )
 
 
 @dataclass(slots=True)
@@ -253,12 +274,16 @@ class BenchmarkResult:
 class PhysicsBenchmarkScene(pu.SceneUnit):
     def __init__(self, app: pu.App, config: BenchmarkConfig) -> None:
         super().__init__(name="physics-benchmark-scene")
+        from benchmarks.benchmark_root import BenchmarkRoot
+
+        self.root = BenchmarkRoot(self._submit_frame)
         self.app = app
         self.config = config
         self._physics: pu.Physics | None = None
         self._debug_draw: pu.PhysicsDebugDraw | None = None
         self._debug_node: pu.NodeUnit | None = None
         self._text: pu.Text | None = None
+        self._shape_textures: dict[str, Texture2DHandle] = {}
 
         self._bodies: list[BodyRecord] = []
         self._static_rects: list[tuple[float, float, float, float]] = []
@@ -312,6 +337,21 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
             random.seed(self.config.seed)
 
         self._physics = self.one_or_none("@Physics", scope="global")
+        if self.config.render_mode == "sprite":
+            canvas = self.app.renderer.canvas
+            for shape, texture in (
+                (
+                    "box",
+                    canvas.create_rect(rect=(0, 0, 1, 1), color=(255, 255, 255, 255)),
+                ),
+                (
+                    "circle",
+                    canvas.create_circle(radius=16.0, color=(255, 255, 255, 255)),
+                ),
+            ):
+                asset_id = f"physics_benchmark_{shape}"
+                self.app.assets.store_texture(asset_id, texture)
+                self._shape_textures[shape] = self.app.assets.get_asset(asset_id)
         if self.config.overlay:
             self._text = pu.Text()
         self._build_world()
@@ -371,7 +411,7 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
         if self.body_count > self._peak_bodies:
             self._peak_bodies = self.body_count
 
-    def render_submit(self, renderer) -> None:
+    def _submit_frame(self, renderer) -> None:
         now = time.perf_counter()
         if self._last_frame_time is not None:
             frame_dt = max(_EPSILON, now - self._last_frame_time)
@@ -527,7 +567,7 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
             x, y = self._spawn_position()
             shape_name = self._select_shape()
             color = random.choice(_BODY_COLORS)
-            shapes = []
+            shapes: list[pu.PhysicsShape] = []
             fixed_rotation = False
             if shape_name == "circle":
                 radius = random.uniform(8.0, 16.0)
@@ -569,8 +609,12 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
                 for shape in shapes:
                     body.add_shape(shape)
                 record = BodyRecord(body_node, body, None, *shape_data, color)
-                if self.config.render_mode == "primitive":
-                    body_node.add_component(BenchmarkBodyRenderer(record))
+                if self.config.render_mode != "none":
+                    body_node.add_component(
+                        BenchmarkBodyRenderer(
+                            record, self._shape_textures.get(shape_name)
+                        )
+                    )
                 self.root.attach(body_node)
             if self.config.scenario in {"rain", "mixed"}:
                 velocity = (random.uniform(-40.0, 40.0), random.uniform(-20.0, 20.0))
@@ -684,12 +728,26 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
             return
         sprite_mode = self.config.render_mode == "sprite"
         if self._static_rects:
-            renderer.render_rects(
-                z=-10,
-                layer=Layer.WORLD,
-                rects=self._static_rects,
-                colors=self._static_colors,
-            )
+            if sprite_mode:
+                for rect, color in zip(self._static_rects, self._static_colors):
+                    renderer.render_sprite(
+                        texture=self._shape_textures["box"],
+                        dest=rect,
+                        tint=color,
+                        z=-10,
+                        layer=Layer.WORLD,
+                    )
+            else:
+                renderer.render_custom(
+                    z=-10,
+                    layer=Layer.WORLD,
+                    draw_func=lambda canvas, rects=tuple(self._static_rects), colors=tuple(self._static_colors): (
+                        canvas.draw_rectangle_batch(
+                            rects=rects,
+                            colors=colors,
+                        )
+                    ),
+                )
 
         circles_pos = []
         circles_rad = []
@@ -712,19 +770,19 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
                 rotation = world.rotation
             else:
                 continue
-            if record.shape == "circle":
-                if sprite_mode:
-                    renderer.render_circle(
-                        z=0,
-                        layer=Layer.ENTITIES,
-                        center=(x, y),
-                        radius=record.radius,
-                        color=record.color,
-                    )
-                else:
-                    circles_pos.append((x, y))
-                    circles_rad.append(record.radius)
-                    circles_col.append(record.color)
+            if sprite_mode:
+                renderer.render_sprite(
+                    texture=self._shape_textures[record.shape],
+                    dest=(x, y, record.width, record.height),
+                    origin=(record.width * 0.5, record.height * 0.5),
+                    rotation=rotation,
+                    tint=record.color,
+                    layer=Layer.ENTITIES,
+                )
+            elif record.shape == "circle":
+                circles_pos.append((x, y))
+                circles_rad.append(record.radius)
+                circles_col.append(record.color)
             elif abs(rotation) < 0.001:
                 rects.append((
                     x - record.width * 0.5,
@@ -734,29 +792,37 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
                 ))
                 rect_cols.append(record.color)
             else:
-                renderer.render_rect(
+                renderer.render_custom(
                     z=0,
                     layer=Layer.ENTITIES,
-                    rect=(x, y, record.width, record.height),
-                    origin=(record.width * 0.5, record.height * 0.5),
-                    rotation=rotation,
-                    color=record.color,
+                    draw_func=lambda canvas, rect=(x, y, record.width, record.height), origin=(record.width * 0.5, record.height * 0.5), rotation=rotation, color=record.color: (
+                        canvas.draw_rectangle(
+                            rect=rect,
+                            origin=origin,
+                            rotation=rotation,
+                            color=color,
+                        )
+                    ),
                 )
 
         if circles_pos:
-            renderer.render_circles(
+            renderer.render_custom(
                 z=0,
                 layer=Layer.ENTITIES,
-                centers=circles_pos,
-                radii=circles_rad,
-                colors=circles_col,
+                draw_func=lambda canvas: canvas.draw_circle_batch(
+                    centers=circles_pos,
+                    radii=circles_rad,
+                    colors=circles_col,
+                ),
             )
         if rects:
-            renderer.render_rects(
+            renderer.render_custom(
                 z=0,
                 layer=Layer.ENTITIES,
-                rects=rects,
-                colors=rect_cols,
+                draw_func=lambda canvas: canvas.draw_rectangle_batch(
+                    rects=rects,
+                    colors=rect_cols,
+                ),
             )
 
     def _submit_overlay(self, renderer) -> None:
@@ -904,7 +970,7 @@ class PhysicsBenchmarkApp(pu.App):
         _ = dt
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((245, 245, 245, 255))
+        self.window.clear_background(self.benchmark_config.background_color)
         self.scene_manager.render(self.renderer)
         self.renderer.flush_all()
         self.window.end_drawing()
@@ -1119,7 +1185,6 @@ def run_benchmark(config: BenchmarkConfig) -> BenchmarkResult:
             fixed_update_hz=config.fixed_update_hz,
             max_frame_delta_time=config.max_frame_delta_time,
             max_substeps_per_frame=config.max_substeps_per_frame,
-            background_color=config.background_color,
         ),
     )
     start = time.perf_counter()

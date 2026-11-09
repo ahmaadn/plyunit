@@ -1,14 +1,12 @@
-"""Example: Scissor + Camera
+"""Demonstrate scissor clipping with a 2D camera.
 
-Demonstrasi penggunaan scissor clipping dengan kamera 2D.
-- Scissor menggunakan world coordinates (auto-convert ke screen coords)
-- Nested scissor (intersection)
-- Scissor tetap benar saat kamera zoom/pan
+World-space clip rectangles are converted to screen coordinates and intersected
+with parent clips, including while the camera pans or zooms.
 
-Kontrol:
-- Arrow keys: gerakkan kamera
-- Mouse wheel: zoom in/out
-- R: reset kamera
+Controls:
+    Arrow keys: Move the camera.
+    Mouse wheel: Zoom in or out.
+    R: Reset the camera.
 """
 
 import math
@@ -16,10 +14,12 @@ import math
 import pyray as pr
 
 import plyunit as pu
+from plyunit.backends.ports.camera2d import ICamera2D
+from plyunit.backends.ports.renderer import ICanvas2D
 
 
 class BouncingBall(pu.NodeUnit):
-    """Bola yang bergerak melingkar — akan terpotong oleh scissor parent."""
+    """Move a ball in a circle, clipped by its parent's scissor rectangle."""
 
     def __init__(self, color: tuple[int, int, int, int], speed: float = 2.0) -> None:
         super().__init__(name="BouncingBall")
@@ -31,11 +31,11 @@ class BouncingBall(pu.NodeUnit):
     def update(self, dt: float) -> None:
         self.time += dt
 
-    def draw(self, canvas: pu.interfaces.ICanvas2D) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         wt = self.world_transform_lerp()
         x, y = wt.position
 
-        # Bergerak melingkar
+        # Circular movement
         ox = math.cos(self.time * self.speed) * 80.0
         oy = math.sin(self.time * self.speed) * 80.0
 
@@ -50,7 +50,7 @@ class BouncingBall(pu.NodeUnit):
 
 
 class ScissorPanel(pu.NodeUnit):
-    """Panel dengan scissor clipping. Anak-anaknya akan dipotong."""
+    """Clip child nodes to a panel's world-space rectangle."""
 
     def __init__(
         self,
@@ -66,7 +66,7 @@ class ScissorPanel(pu.NodeUnit):
         self.border_color = border_color
 
     def update(self, dt: float) -> None:
-        # Update scissor rect setiap frame (mengikuti world transform)
+        # Keep the clip rectangle aligned with the world transform.
         wt = self.transform.world
         x, y = wt.position
         self.set_scissor((x, y, self.width, self.height))
@@ -84,23 +84,28 @@ class ScissorPanel(pu.NodeUnit):
         wt = self.world_transform_lerp()
         x, y = wt.position
 
-        # Background semi-transparan
-        renderer.render_rect(
+        # Translucent background
+        renderer.render_custom(
             z=-1,
             layer=pu.Layer.WORLD,
-            rect=(x, y, self.width, self.height),
-            color=(30, 30, 50, 100),
+            draw_func=lambda canvas, rect=(x, y, self.width, self.height): (
+                canvas.draw_rectangle(rect=rect, color=(30, 30, 50, 100))
+            ),
             scissor=self._resolved_scissor,
         )
 
         # Border
-        renderer.render_rect(
+        renderer.render_custom(
             z=10,
             layer=pu.Layer.WORLD,
-            rect=(x, y, self.width, self.height),
-            color=self.border_color,
-            outline_only=True,
-            thickness=2.0,
+            draw_func=lambda canvas, rect=(x, y, self.width, self.height), color=self.border_color: (
+                canvas.draw_rectangle(
+                    rect=rect,
+                    color=color,
+                    outline_only=True,
+                    thickness=2.0,
+                )
+            ),
         )
 
         # Title
@@ -115,7 +120,7 @@ class ScissorPanel(pu.NodeUnit):
 
 
 class ScrollingText(pu.NodeUnit):
-    """Teks yang bergulir horizontal — terpotong oleh scissor parent."""
+    """Scroll text horizontally through its parent's scissor rectangle."""
 
     def __init__(self, text: str, color: tuple[int, int, int, int]) -> None:
         super().__init__(name="ScrollingText")
@@ -126,7 +131,7 @@ class ScrollingText(pu.NodeUnit):
     def update(self, dt: float) -> None:
         self.time += dt
 
-    def draw(self, canvas: pu.interfaces.ICanvas2D) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         wt = self.world_transform_lerp()
         x, y = wt.position
         ox = math.sin(self.time * 1.5) * 200.0
@@ -140,32 +145,32 @@ class MainScene(pu.SceneUnit):
         super().__init__("Main", tags={"main"})
 
     def on_load(self) -> None:
-        # Panel utama (besar, merah)
+        # Main panel (red)
         main_panel = ScissorPanel(350, 300, "World Panel (Scissor)", (255, 80, 80, 255))
         self.root.attach(main_panel)
         main_panel.transform.set_position(50, 50)
 
-        # Bola hijau di dalam panel utama
+        # Green ball inside the main panel
         ball1 = BouncingBall((100, 255, 100, 255), speed=2.0)
         main_panel.attach(ball1)
         ball1.transform.set_position(175, 150)
 
-        # Teks bergulir
-        scroll = ScrollingText("TEKS PANJANG TERPOTONG SCISSOR!", (200, 200, 200, 255))
+        # Scrolling text
+        scroll = ScrollingText("LONG TEXT CLIPPED BY SCISSOR!", (200, 200, 200, 255))
         main_panel.attach(scroll)
         scroll.transform.set_position(175, 250)
 
-        # Panel dalam (nested, biru) — scissor-nya akan di-intersect dengan parent
+        # The nested blue panel intersects its parent's clip rectangle.
         inner_panel = ScissorPanel(150, 150, "Nested", (80, 150, 255, 255))
         main_panel.attach(inner_panel)
         inner_panel.transform.set_position(100, 75)
 
-        # Bola kuning di panel dalam
+        # Yellow ball inside the nested panel
         ball2 = BouncingBall((255, 255, 80, 255), speed=3.0)
         inner_panel.attach(ball2)
         ball2.transform.set_position(75, 75)
 
-        # Panel independen (oranye)
+        # Independent panel (orange)
         side_panel = ScissorPanel(120, 200, "Side", (255, 165, 0, 255))
         self.root.attach(side_panel)
         side_panel.transform.set_position(440, 100)
@@ -174,7 +179,7 @@ class MainScene(pu.SceneUnit):
         side_panel.attach(ball3)
         ball3.transform.set_position(60, 100)
 
-        # Objek TANPA scissor — tidak terpotong
+        # This ball has no scissor rectangle and is not clipped.
         free_ball = BouncingBall((255, 100, 255, 255), speed=1.5)
         self.root.attach(free_ball)
         free_ball.transform.set_position(300, 420)
@@ -191,13 +196,14 @@ class ScissorCameraApp(pu.App):
         self.input.map("reset", pr.KeyboardKey.KEY_R)
 
         # Free-look: snap, no dead zone / slowness lag.
-        self.camera: pu.Camera2D = pu.Camera2D(
+        self.camera: ICamera2D = pu.Camera2D(
             size=(640, 500),
             position=(320, 250),
             slowness=0.0,
         )
         self.camera.setup(640, 500)
         self.camera.teleport((320, 250))
+        self._zoom = 1.0
 
         self.scene_manager.push(MainScene())
         self.text = pu.Text()
@@ -207,20 +213,20 @@ class ScissorCameraApp(pu.App):
 
         wheel = self.mouse.get_wheel_move()
         if wheel != 0:
-            zoom = self.camera._zoom + wheel * 0.1
-            self.camera.set_zoom(max(0.3, min(3.0, zoom)))
+            self._zoom = max(0.3, min(3.0, self._zoom + wheel * 0.1))
+            self.camera.set_zoom(self._zoom)
 
         if self.input.is_pressed("reset"):
             self.camera.teleport((320, 250))
-            self.camera.set_zoom(1.0)
+            self._zoom = 1.0
+            self.camera.set_zoom(self._zoom)
 
         speed = 260.0 * dt
         dx = self.input.get_axis("cam_left", "cam_right")
         dy = self.input.get_axis("cam_up", "cam_down")
         if dx or dy:
-            self.camera.pos[0] += dx * speed
-            self.camera.pos[1] += dy * speed
-            self.camera.target_position = (self.camera.pos[0], self.camera.pos[1])
+            self.camera.move((dx * speed, dy * speed))
+            self.camera.set_target(tuple(self.camera.pos))
 
         self.scene_manager.update(dt)
         self.scene_manager.apply_pending()
@@ -233,7 +239,7 @@ class ScissorCameraApp(pu.App):
         self.window.clear_background((20, 20, 30, 255))
         self.scene_manager.render(self.renderer)
 
-        # UI overlay (tidak terpengaruh kamera)
+        # Screen-space UI is not affected by the camera.
         self.text.render(
             z=0,
             layer=pu.Layer.UI,
@@ -243,7 +249,7 @@ class ScissorCameraApp(pu.App):
             color=(180, 180, 180, 255),
         )
 
-        zoom_text = f"Zoom: {self.camera._zoom:.1f}x"
+        zoom_text = f"Zoom: {self._zoom:.1f}x"
         self.text.render(
             z=0,
             layer=pu.Layer.UI,

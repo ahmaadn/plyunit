@@ -126,13 +126,16 @@ def test_debug_draw_statics_and_areas():
         def create_pass(self, name, **kw):
             self.passes.append(name)
 
-        def render_circle(self, **kw):
+        def render_custom(self, *, draw_func, **state):
+            draw_func(self)
+
+        def draw_circle(self, **kw):
             self.primitives.append(("c", kw))
 
-        def render_rect(self, **kw):
+        def draw_rectangle(self, **kw):
             self.primitives.append(("r", kw))
 
-        def render_line(self, **kw):
+        def draw_line(self, **kw):
             self.primitives.append(("l", kw))
 
     dbg = pu.PhysicsDebugDraw(

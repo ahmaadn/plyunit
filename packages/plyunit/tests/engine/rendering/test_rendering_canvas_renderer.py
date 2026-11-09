@@ -7,7 +7,8 @@ import pytest
 
 import plyunit as pu
 import plyunit.rendering.renderer as renderer_module
-import plyunit.backends.integrations.raylib.drawing.canvas as canvas_module
+from plyunit.backends.integrations.raylib.handler import Font, Texture2D
+import plyunit.backends.integrations.raylib.renderer.canvas as canvas_module
 
 unit_module = importlib.import_module("plyunit.core.units.unit")
 
@@ -79,7 +80,7 @@ def test_canvas_draw_texture_paths(monkeypatch: pytest.MonkeyPatch) -> None:
     canvas_module._cache_color.clear()
     canvas = canvas_module
 
-    texture = SimpleNamespace(width=16, height=8)
+    texture = Texture2D.from_raw(SimpleNamespace(id=1, width=16, height=8, format=7))
 
     # pyrefly: ignore [bad-argument-type]
     canvas.draw_texture(texture=texture, pos=(10.2, 20.9), tint=(1, 2, 3, 4))
@@ -187,7 +188,7 @@ def test_canvas_primitives_and_color_helpers(
         font_size=20,
         color=(1, 1, 1, 255),
         # pyrefly: ignore [bad-argument-type]
-        font="font",
+        font=Font.from_raw(SimpleNamespace(baseSize=16, glyphCount=95, texture=SimpleNamespace(id=9, width=64, height=64, format=7))),
         spacing=2.0,
     )
     canvas.draw_text(
@@ -203,7 +204,7 @@ def test_canvas_primitives_and_color_helpers(
         color=(3, 3, 3, 255),
         codepoints=[65, 66],
         # pyrefly: ignore [bad-argument-type]
-        font="font",
+        font=Font.from_raw(SimpleNamespace(baseSize=16, glyphCount=95, texture=SimpleNamespace(id=9, width=64, height=64, format=7))),
     )
 
     first_color = canvas.color((3, 4, 5, 6))
@@ -268,12 +269,12 @@ def test_renderer_flush_orders_by_layer_and_z(
         font_size=14,
         color=(255, 255, 255, 255),
     )
-    renderer.render_circle(
+    renderer.render_custom(
         z=0,
         layer=renderer_module.Layer.WORLD,
-        center=(0.0, 0.0),
-        radius=2.0,
-        color=(1, 1, 1, 255),
+        draw_func=lambda canvas: canvas.draw_circle(
+            center=(0.0, 0.0), radius=2.0, color=(1, 1, 1, 255)
+        ),
     )
 
     def custom_draw(canvas):
@@ -285,11 +286,12 @@ def test_renderer_flush_orders_by_layer_and_z(
         layer=renderer_module.Layer.UI,
         draw_func=custom_draw,
     )
-    renderer.render_rect(
+    renderer.render_custom(
         z=2,
         layer=renderer_module.Layer.UI,
-        rect=(0.0, 0.0, 1.0, 1.0),
-        color=(2, 2, 2, 255),
+        draw_func=lambda canvas: canvas.draw_rectangle(
+            rect=(0.0, 0.0, 1.0, 1.0), color=(2, 2, 2, 255)
+        ),
     )
 
     renderer.flush()
@@ -323,12 +325,12 @@ def test_renderer_partial_flush_keeps_ui_layers_for_later(
     # pyrefly: ignore [bad-argument-type]
     renderer = renderer_module.Renderer(canvas=canvas_module, ubr=_FakeUbr())
 
-    renderer.render_circle(
+    renderer.render_custom(
         z=0,
         layer=renderer_module.Layer.WORLD,
-        center=(0.0, 0.0),
-        radius=2.0,
-        color=(1, 1, 1, 255),
+        draw_func=lambda canvas: canvas.draw_circle(
+            center=(0.0, 0.0), radius=2.0, color=(1, 1, 1, 255)
+        ),
     )
     renderer.render_text(
         z=1,
@@ -359,7 +361,7 @@ def test_renderer_missing_required_submit_argument_raises(
     renderer = renderer_module.Renderer(canvas=canvas_module, ubr=_FakeUbr())
 
     with pytest.raises(TypeError):
-        renderer.render_circle(z=0, layer=renderer_module.Layer.UI)  # type: ignore[call-arg]
+        renderer.render_custom(z=0, layer=renderer_module.Layer.UI)  # type: ignore[call-arg]
 
 
 def test_canvas_batch_draw_methods(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -425,4 +427,3 @@ def test_canvas_batch_draw_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(calls["draw_circle_v"]) == 2
     assert len(calls["draw_line_v"]) == 2
     assert len(calls["draw_triangle"]) == 2
-

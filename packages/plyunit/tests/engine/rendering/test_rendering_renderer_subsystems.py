@@ -4,9 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.canvas as canvas_module
+import plyunit.backends.integrations.raylib.renderer.canvas as canvas_module
 import plyunit.rendering.renderer as renderer_module
 from plyunit.rendering.enum import BlendMode
+from rendering_fakes import FakeShader, FakeRenderTexture, TextureIdAdapter, make_texture
 from plyunit.rendering.render_state import RenderContext, RenderStateCache
 
 
@@ -44,7 +45,7 @@ def test_render_context_and_state_cache_paths() -> None:
 
     cache = RenderStateCache()
     default_id = cache.intern()
-    shader = SimpleNamespace(id=9)
+    shader = FakeShader()
     custom_id = cache.intern(
         # pyrefly: ignore [bad-argument-type]
         scissor=(1, 2, 3, 4), blend_mode=BlendMode.ADDITIVE, shader=shader
@@ -97,7 +98,7 @@ def test_renderer_typed_subsystems_submit_and_render(
     monkeypatch.setattr(canvas_module, "pr", fake_pr)
     monkeypatch.setitem(__import__("sys").modules, "pyray", fake_pr)
 
-    class FakeUbr:
+    class FakeUbr(TextureIdAdapter):
         capacity = 256
 
         def init(self, n: int) -> None:
@@ -174,9 +175,9 @@ def test_renderer_typed_subsystems_submit_and_render(
         ubr=FakeUbr(),
         max_sprites=256,
     )
-    texture = SimpleNamespace(id=1, width=8, height=8)
-    shader = SimpleNamespace(id=2)
-    target = SimpleNamespace(texture=texture)
+    texture = make_texture(1, 8, 8)
+    shader = FakeShader()
+    target = FakeRenderTexture(texture)
     camera = SimpleNamespace(
         viewport=(0, 0, 100, 100),
         start_frame=lambda: calls.append(("camera_begin", None)),
@@ -192,15 +193,32 @@ def test_renderer_typed_subsystems_submit_and_render(
     renderer.render_batch(texture=texture, positions=[(8.0, 8.0), (9.0, 9.0)])
     renderer.render_sprite(texture=texture, pos=(3.0, 4.0))
     renderer.render_sprite(texture=texture, dest=(0.0, 0.0, 16.0, 16.0))
-    renderer.render_rect(rect=(0, 0, 10, 10), color=(255, 0, 0, 255))
-    renderer.render_circle(center=(4, 4), radius=2, color=(0, 255, 0, 255))
-    renderer.render_line(start=(0, 0), end=(1, 1), color=(0, 0, 255, 255))
-    renderer.render_triangle(v1=(0, 0), v2=(1, 0), v3=(0, 1), color=(255, 255, 0, 255))
+    renderer.render_custom(
+        draw_func=lambda canvas: canvas.draw_rectangle(
+            rect=(0, 0, 10, 10), color=(255, 0, 0, 255)
+        )
+    )
+    renderer.render_custom(
+        draw_func=lambda canvas: canvas.draw_circle(
+            center=(4, 4), radius=2, color=(0, 255, 0, 255)
+        )
+    )
+    renderer.render_custom(
+        draw_func=lambda canvas: canvas.draw_line(
+            start=(0, 0), end=(1, 1), color=(0, 0, 255, 255)
+        )
+    )
+    renderer.render_custom(
+        draw_func=lambda canvas: canvas.draw_triangle(
+            v1=(0, 0), v2=(1, 0), v3=(0, 1), color=(255, 255, 0, 255)
+        )
+    )
     renderer.render_text(text="world", pos=(5, 5), layer=renderer_module.Layer.WORLD)
     renderer.render_custom(draw_func=lambda canvas: calls.append(("custom", canvas)))
-    renderer.render_rect(
-        rect=(2, 2, 3, 3),
-        color=(255, 255, 255, 255),
+    renderer.render_custom(
+        draw_func=lambda canvas: canvas.draw_rectangle(
+            rect=(2, 2, 3, 3), color=(255, 255, 255, 255)
+        ),
         scissor=(5, 5, 20, 20),
         blend_mode=BlendMode.ADDITIVE,
         shader=shader,
@@ -226,7 +244,11 @@ def test_renderer_typed_subsystems_submit_and_render(
     assert renderer._frame_buffer.count == 0
 
     calls.clear()
-    renderer.render_rect(rect=(0, 0, 2, 2), color=(255, 255, 255, 255))
+    renderer.render_custom(
+        draw_func=lambda canvas: canvas.draw_rectangle(
+            rect=(0, 0, 2, 2), color=(255, 255, 255, 255)
+        )
+    )
     renderer.flush_all(camera=None)
 
     labels = [label for label, _ in calls]
@@ -238,7 +260,7 @@ def test_renderer_typed_subsystems_submit_and_render(
 
 
 def test_renderer_bulk_and_direct_alias_paths(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeUbr:
+    class FakeUbr(TextureIdAdapter):
         capacity = 64
 
         def init(self, n: int) -> None:
@@ -269,6 +291,22 @@ def test_renderer_bulk_and_direct_alias_paths(monkeypatch: pytest.MonkeyPatch) -
 
         @staticmethod
         def draw_text(**kwargs):
+            pass
+
+        @staticmethod
+        def draw_rectangle_batch(**kwargs):
+            pass
+
+        @staticmethod
+        def draw_circle_batch(**kwargs):
+            pass
+
+        @staticmethod
+        def draw_line_batch(**kwargs):
+            pass
+
+        @staticmethod
+        def draw_triangle_batch(**kwargs):
             pass
 
         @staticmethod
@@ -311,13 +349,27 @@ def test_renderer_bulk_and_direct_alias_paths(monkeypatch: pytest.MonkeyPatch) -
     renderer = renderer_module.Renderer(
         canvas=FakeCanvasMod, ubr=FakeUbr(), max_sprites=64
     )
-    texture = SimpleNamespace(id=3, width=4, height=4)
+    texture = make_texture(3, 4, 4)
 
-    renderer.render_rects(rects=[(0, 0, 1, 1)], colors=[(1, 2, 3, 4)])
-    renderer.render_circles(centers=[(0, 0)], radii=[1.0], colors=[(1, 2, 3, 4)])
-    renderer.render_lines(starts=[(0, 0)], ends=[(1, 1)], colors=[(1, 2, 3, 4)])
-    renderer.render_triangles(
-        v1s=[(0, 0)], v2s=[(1, 0)], v3s=[(0, 1)], colors=[(1, 2, 3, 4)]
+    renderer.render_custom(
+        draw_func=lambda canvas: canvas.draw_rectangle_batch(
+            rects=[(0, 0, 1, 1)], colors=[(1, 2, 3, 4)]
+        )
+    )
+    renderer.render_custom(
+        draw_func=lambda canvas: canvas.draw_circle_batch(
+            centers=[(0, 0)], radii=[1.0], colors=[(1, 2, 3, 4)]
+        )
+    )
+    renderer.render_custom(
+        draw_func=lambda canvas: canvas.draw_line_batch(
+            starts=[(0, 0)], ends=[(1, 1)], colors=[(1, 2, 3, 4)]
+        )
+    )
+    renderer.render_custom(
+        draw_func=lambda canvas: canvas.draw_triangle_batch(
+            v1s=[(0, 0)], v2s=[(1, 0)], v3s=[(0, 1)], colors=[(1, 2, 3, 4)]
+        )
     )
     # pyrefly: ignore [bad-argument-type]
     renderer.render_batch(texture=texture, positions=[])

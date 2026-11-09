@@ -6,7 +6,7 @@ from types import SimpleNamespace
 import pytest
 
 import plyunit as pu
-from plyunit.assets.animations import AnimationClip, AnimationFrame, Animations
+from plyunit.services.animations import AnimationClip, AnimationFrame, Animations
 from plyunit.core.components.builtin.animator import AnimationController
 from plyunit.core.components.builtin.sprite import SpriteRenderer
 
@@ -80,7 +80,7 @@ def test_sprite_renderer_render_submit_and_flips(
 ) -> None:
     _ = isolated_registry
 
-    texture = SimpleNamespace(width=10, height=20)
+    texture = SimpleNamespace(width=10, height=20, source_rect=(0.0, 0.0, 10.0, 20.0))
     sprite = SpriteRenderer(
         "",
         # pyrefly: ignore [bad-argument-type]
@@ -109,14 +109,14 @@ def test_sprite_renderer_render_submit_and_flips(
     assert draw["pos"] == (1.0, 2.0)
     assert draw["source"] == (10.0, 0.0, -10.0, 20.0)
 
-    empty_texture = SimpleNamespace(width=0, height=0)
+    empty_texture = SimpleNamespace(width=0, height=0, source_rect=(0.0, 0.0, 0.0, 0.0))
     # pyrefly: ignore [bad-argument-type]
     sprite_empty = SpriteRenderer("", texture=empty_texture)
-    assert sprite_empty._compute_flipped_source_rect() is None
+    assert sprite_empty._compute_flipped_source_rect() == (0.0, 0.0, 0.0, 0.0)
 
 
 def test_sprite_renderer_uses_asset_region_without_flip() -> None:
-    texture = SimpleNamespace(width=128, height=128)
+    texture = SimpleNamespace(width=128, height=128, source_rect=(1.0, 1.0, 60.0, 60.0))
     sprite = SpriteRenderer("well", use_interpolation=False)
     calls: list[dict[str, object]] = []
 
@@ -125,9 +125,6 @@ def test_sprite_renderer_uses_asset_region_without_flip() -> None:
             assert key == "well"
             return texture
 
-        def get_source_rect(self, key):
-            assert key == "well"
-            return (1.0, 1.0, 60.0, 60.0)
 
     class Renderer:
         def render_sprite(self, **kwargs):
@@ -144,7 +141,7 @@ def test_sprite_renderer_uses_asset_region_without_flip() -> None:
 
 
 def test_sprite_renderer_uses_render_context_transform() -> None:
-    texture = SimpleNamespace(width=10, height=20)
+    texture = SimpleNamespace(width=10, height=20, source_rect=(0.0, 0.0, 10.0, 20.0))
     # pyrefly: ignore [bad-argument-type]
     sprite = SpriteRenderer("", texture=texture, use_interpolation=True)
     node = pu.NodeUnit("Hero")

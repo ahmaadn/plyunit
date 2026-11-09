@@ -1,8 +1,7 @@
-"""Rendering subpackage: queue, passes, renderer, and draw-call types.
+"""Backend-neutral rendering pipeline, frame buffers, and render-state types.
 
-Contains the rendering pipeline, render state, draw queue, batch system,
-and the renderer facades (debug, particles, tilemap, UI) for the raylib
-based 2D engine.
+Canvas and native batch adapters are injected through ports. Resource handles
+remain opaque throughout submission, sorting, and pass dispatch.
 """
 
 from .draw_scope import DrawScope

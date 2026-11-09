@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "last_open": null,
+  "open_list": [],
+  "camera": {
+    "x": 0.0,
+    "y": 0.0,
+    "zoom": 2.0
+  },
+  "grid": {
+    "tile": true,
+    "chunk": true,
+    "origin": true,
+    "collision": false,
+    "objects": true
+  },
+  "active_layer": "1",
+  "explorer_relevant_only": false,
+  "panels": {},
+  "sidebar": {}
+}

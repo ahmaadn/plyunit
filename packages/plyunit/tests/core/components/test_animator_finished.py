@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from plyunit.assets.animations import AnimationClip, AnimationFrame, Animations
+from plyunit.services.animations import AnimationClip, AnimationFrame, Animations
 from plyunit.core.components.builtin.animator import AnimationController
 from plyunit.core.components.builtin.sprite import SpriteRenderer
 from plyunit.events.event_bus import EventBus

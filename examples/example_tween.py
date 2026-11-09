@@ -33,6 +33,13 @@ class TweenApp(pu.App):
         self._paused = False
         self._start_motion()
         self.text = pu.Text()
+        self.assets.store_texture(
+            "tween_box",
+            self.renderer.canvas.create_rect(
+                rect=(0, 0, 56, 56), color=(255, 255, 255, 255)
+            ),
+        )
+        self._box_texture = self.assets.get_asset("tween_box")
 
     def _start_motion(self) -> None:
         timers = self.one("@Timer")
@@ -112,17 +119,19 @@ class TweenApp(pu.App):
         bx, by = b.position
         sx, sy = b.scale
         w, h = 56.0 * sx, 56.0 * sy
-        self.renderer.render_rect(
+        self.renderer.render_sprite(
             z=0,
             layer=pu.Layer.WORLD,
-            rect=(ax, ay, 48.0, 48.0),
-            color=(70, 140, 255, 255),
+            texture=self._box_texture,
+            dest=(ax, ay, 48.0, 48.0),
+            tint=(70, 140, 255, 255),
         )
-        self.renderer.render_rect(
+        self.renderer.render_sprite(
             z=1,
             layer=pu.Layer.WORLD,
-            rect=(bx - w * 0.5, by - h * 0.5, w, h),
-            color=(255, 160, 60, 255),
+            texture=self._box_texture,
+            dest=(bx, by, w, h),
+            tint=(255, 160, 60, 255),
             rotation=b.rotation,
             origin=(w * 0.5, h * 0.5),
         )

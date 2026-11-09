@@ -204,6 +204,15 @@ class TestBridge:
         bridge.install_one_way_handler()
         assert len(physics._pre_solve_handlers) == n1
 
+    def test_one_way_handler_is_shared_across_bridges(self):
+        """Reloading a tilemap must not retain its bridge in native callbacks."""
+        physics = Physics(gravity=(0, 0))
+        first = TileMapPhysicsBridge(physics)
+        second = TileMapPhysicsBridge(physics)
+        first.install_one_way_handler()
+        second.install_one_way_handler()
+        assert len(physics._pre_solve_handlers) == 1
+
     def test_one_way_passes_from_below_blocks_from_above(self):
         physics = Physics(gravity=(0, 900))
         bridge = TileMapPhysicsBridge(physics, tile_size=16, chunk_size=16)

@@ -10,18 +10,28 @@ class FakeRenderer:
     def __init__(self) -> None:
         self.passes = []
         self.primitives = []
+        self.queued = []
 
     def create_pass(self, name: str, **kwargs) -> None:
         self.passes.append((name, kwargs))
 
-    def render_circle(self, **kwargs) -> None:
-        self.primitives.append(("circle", kwargs))
+    def render_custom(self, *, draw_func, **state) -> None:
+        self.queued.append((draw_func, state))
 
-    def render_rect(self, **kwargs) -> None:
-        self.primitives.append(("rect", kwargs))
+    def flush(self) -> None:
+        for draw_func, state in self.queued:
+            self._state = state
+            draw_func(self)
+        self.queued.clear()
 
-    def render_line(self, **kwargs) -> None:
-        self.primitives.append(("line", kwargs))
+    def draw_circle(self, **kwargs) -> None:
+        self.primitives.append(("circle", kwargs | self._state))
+
+    def draw_rectangle(self, **kwargs) -> None:
+        self.primitives.append(("rect", kwargs | self._state))
+
+    def draw_line(self, **kwargs) -> None:
+        self.primitives.append(("line", kwargs | self._state))
 
 
 class FakeUnit:
@@ -61,6 +71,7 @@ def test_render_submit_accepts_context_and_uses_typed_debug_state() -> None:
     renderer = FakeRenderer()
 
     debug_draw.render_submit(renderer, object())
+    renderer.flush()
 
     assert renderer.passes
     pass_name, pass_kwargs = renderer.passes[0]
@@ -105,9 +116,29 @@ def test_debug_draw_interpolates_body_records_with_render_alpha() -> None:
     renderer = FakeRenderer()
 
     debug_draw.render_submit(renderer, object())
+    renderer.flush()
 
     rect = next(payload for kind, payload in renderer.primitives if kind == "rect")
     assert rect["rect"] == (5.0, 15.0, 10.0, 20.0)
     assert rect["rotation"] == 22.5
+    assert rect["outline_only"] is True
 
     service.destroy_body(handle)
+
+
+def test_debug_callbacks_snapshot_each_shape_before_flush() -> None:
+    shapes = [pu.CircleShape(radius=3, offset=(1, 2)),
+        pu.CircleShape(radius=9, offset=(8, 7)),
+        pu.PolygonShape(vertices=[(0, 0), (10, 0), (0, 10)])]
+    debug = pu.PhysicsDebugDraw()
+    renderer = FakeRenderer()
+    debug._submit_shapes(renderer, shapes, 0, 0, 0, (50, 100, 150, 255), sensor_fill=False)
+    shapes.clear()
+    renderer.flush()
+
+    circles = [kw for kind, kw in renderer.primitives if kind == "circle"]
+    assert [(kw["center"], kw["radius"]) for kw in circles] == [((1, 2), 3), ((8, 7), 9)]
+    assert all(kw["outline_only"] for kw in circles)
+    edges = [kw for kind, kw in renderer.primitives if kind == "line"][-3:]
+    assert [(kw["start"], kw["end"]) for kw in edges] == [
+        ((0, 0), (10, 0)), ((10, 0), (0, 10)), ((0, 10), (0, 0))]

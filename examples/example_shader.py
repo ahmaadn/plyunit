@@ -1,21 +1,24 @@
-"""Example: Custom Shader
+"""Apply a time-driven wave and color-pulse shader to a sprite.
 
-Demonstrasi penggunaan custom GLSL shader pada plyunit melalui layanan
-``pu.Shaders`` yang membungkus backend loader raylib
-(``plyunit.backends.integrations.raylib.assets.shader``).
-Kita memuat fragment shader sederhana yang memberikan efek gelombang (wavy)
-dan color pulse pada sebuah sprite.
-
-Kontrol:
-- Tidak ada (efek berjalan otomatis berdasarkan waktu)
+The selected ``Shaders`` service owns shader handles and caches uniform
+locations. Generated images and textures use the raylib integration's handles.
 """
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import pyray as pr
 
 import plyunit as pu
+from plyunit._enums import ShaderUniform
+from plyunit.backends.ports.renderer import ICanvas2D
 
-# Fragment Shader sederhana (GLSL 330)
-# Efek: Sinewave distortion + Grayscale mix
+if TYPE_CHECKING:
+    from plyunit.backends.integrations.raylib.handler import Shader, Texture2D
+    from plyunit.backends.integrations.raylib.shader import Shaders
+
+# GLSL 330 fragment shader: sine-wave distortion and a pulsing color tint.
 FS_CODE = """#version 330
 in vec2 fragTexCoord;
 in vec4 fragColor;
@@ -30,13 +33,13 @@ void main()
 {
     vec2 uv = fragTexCoord;
 
-    // Gelombang sinewave berdasarkan waktu
+    // Animate the sine-wave distortion over time.
     uv.x += sin(uv.y * 50.0 + time * 5.0) * 0.02;
     uv.y += cos(uv.x * 50.0 + time * 3.0) * 0.02;
 
     vec4 texelColor = texture(texture0, uv);
 
-    // Campur dengan warna merah & biru yang berkedip
+    // Blend between red and blue tints.
     float pulse = (sin(time * 2.0) + 1.0) / 2.0;
     vec3 tint = mix(vec3(1.0, 0.2, 0.2), vec3(0.2, 0.5, 1.0), pulse);
 
@@ -61,7 +64,7 @@ void main()
 
 
 class ShaderSprite(pu.NodeUnit):
-    """Sprite yang di-render dengan custom shader dari layanan ``Shaders``."""
+    """Draw a sprite with an optional shader owned by the shader service."""
 
     def __init__(self, x: float, y: float, use_shader: bool = True) -> None:
         super().__init__(name="ShaderSprite")
@@ -70,46 +73,41 @@ class ShaderSprite(pu.NodeUnit):
         self.use_shader = use_shader
         self.time = 0.0
 
-        # Layanan shader, texture, dan handle akan diisi di on_ready
-        # (setelah Raylib window aktif). Catatan: atribut ``shader`` milik
-        # NodeUnit adalah slot render-state (shader mentah), jadi handle
-        # disimpan terpisah di ``shader_handle``.
-        self.shaders: pu.Shaders | None = None
-        self.tex = None
-        self.shader_handle: pu.ShaderHandle | None = None
+        # GPU resources are created in on_ready, after the window exists.
+        self.shaders: Shaders | None = None
+        self.tex: Texture2D | None = None
+        self.shader_handle: Shader | None = None
         self.layer = pu.Layer.ENTITIES
 
     def on_ready(self) -> None:
-        # Ambil layanan shader global (dibuat di ShaderApp.on_load)
-        shaders: pu.Shaders = self.one("@Shaders")
+        from plyunit.backends.integrations.raylib.handler import Image, Texture2D
+
+        shaders: Shaders = self.one("@Shaders")
         self.shaders = shaders
 
-        # Generate gambar checkerboard
-        img = pr.gen_image_checked(200, 200, 25, 25, pr.WHITE, pr.DARKGRAY)
-        self.tex = pr.load_texture_from_image(img)
-        pr.unload_image(img)
+        image = Image(pr.gen_image_checked(200, 200, 25, 25, pr.WHITE, pr.DARKGRAY))
+        try:
+            self.tex = Texture2D.from_raw(pr.load_texture_from_image(image.raw_image))
+        finally:
+            pr.unload_image(image.raw_image)
 
         if self.use_shader:
-            # Muat shader via layanan Shaders (backend: raylib shader loader)
-            handle = shaders.load_from_memory(VS_CODE, FS_CODE)
-            self.shader_handle = handle
-            # Aktifkan shader untuk node ini; Renderer otomatis
-            # mengaktifkan shader-nya saat pass render!
-            self.set_shader(handle.raw)
+            self.shader_handle = shaders.load_from_memory(VS_CODE, FS_CODE)
+            # Render state carries the handle, never its backend shader struct.
+            self.set_shader(self.shader_handle)
 
-        # Set posisi awal
         self.transform.set_position(self.start_x, self.start_y)
 
     def update(self, dt: float) -> None:
         self.time += dt
 
-        # Set uniform 'time' berdasarkan nama (lokasi di-cache oleh layanan)
+        # Uniform locations are cached by name on the shader handle.
         if self.shaders is not None and self.shader_handle is not None:
             self.shaders.set_value(
-                self.shader_handle, "time", self.time, pu.ShaderUniform.FLOAT
+                self.shader_handle, "time", self.time, ShaderUniform.FLOAT
             )
 
-    def draw(self, canvas: pu.interfaces.ICanvas2D) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         if not self.tex:
             return
 
@@ -120,13 +118,16 @@ class ShaderSprite(pu.NodeUnit):
             texture=self.tex, pos=(x - 100, y - 100), tint=(255, 255, 255, 255)
         )
 
-    def destroy(self) -> None:
-        if self.tex:
-            pr.unload_texture(self.tex)
+    def on_exit_tree(self) -> None:
+        """Release node-owned GPU resources when the scene removes this node."""
+        if self.tex is not None:
+            pr.unload_texture(self.tex.raw_texture)
+            self.tex = None
         if self.shaders is not None and self.shader_handle is not None:
+            self.set_shader(None)
             self.shaders.unload(self.shader_handle)
             self.shader_handle = None
-        super().destroy()
+        super().on_exit_tree()
 
 
 class MainScene(pu.SceneUnit):
@@ -134,19 +135,18 @@ class MainScene(pu.SceneUnit):
         super().__init__("Main", tags={"main"})
 
     def on_load(self) -> None:
-        # Judul
+        # Title
         title = pu.NodeUnit("Title")
         title.layer = pu.Layer.UI
         title.draw = lambda canvas: canvas.draw_text(
             text="Custom Shader (Wave & Color Pulse)",
             pos=(150, 30),
             font_size=20,
-            # pyrefly: ignore [bad-argument-type]
-            color=pr.WHITE,
+            color=(255, 255, 255, 255),
         )
         self.root.attach(title)
 
-        # Sprite 1: Tanpa Shader (Kiri)
+        # Left: unshaded sprite
         normal_sprite = ShaderSprite(180, 250, use_shader=False)
         self.root.attach(normal_sprite)
 
@@ -156,12 +156,11 @@ class MainScene(pu.SceneUnit):
             text="NORMAL",
             pos=(140, 380),
             font_size=20,
-            # pyrefly: ignore [bad-argument-type]
-            color=pr.LIGHTGRAY,
+            color=(200, 200, 200, 255),
         )
         self.root.attach(lbl_normal)
 
-        # Sprite 2: Dengan Shader (Kanan)
+        # Right: shader applied
         shader_sprite = ShaderSprite(460, 250, use_shader=True)
         self.root.attach(shader_sprite)
 
@@ -171,16 +170,13 @@ class MainScene(pu.SceneUnit):
             text="SHADER APPLIED",
             pos=(380, 380),
             font_size=20,
-            # pyrefly: ignore [bad-argument-type]
-            color=pr.YELLOW,
+            color=(253, 249, 0, 255),
         )
         self.root.attach(lbl_shader)
 
 
 class ShaderApp(pu.App):
     def on_load(self) -> None:
-        # Layanan shader global; delegasi load/uniform/unload ke backend
-        # raylib (plyunit.backends.integrations.raylib.assets.shader)
         self.shaders = pu.Shaders()
         self.scene_manager.push(MainScene())
 
@@ -193,7 +189,7 @@ class ShaderApp(pu.App):
         _ = dt
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((245, 245, 245, 255))
+        self.window.clear_background((20, 20, 30, 255))
         self.scene_manager.render(self.renderer)
         self.renderer.flush_all()
         self.window.end_drawing()
@@ -206,8 +202,6 @@ def main():
             title="Shader Example",
             window_width=640,
             window_height=480,
-            # pyrefly: ignore [bad-argument-type]
-            background_color=pr.Color(20, 20, 30, 255),
         ),
     )
     app.run()

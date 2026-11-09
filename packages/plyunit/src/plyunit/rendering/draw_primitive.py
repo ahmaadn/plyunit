@@ -7,15 +7,17 @@ modules at load time. Raylib-specific batching stays in
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from .enum import PrimitiveKind
 
 if TYPE_CHECKING:
+    from plyunit.backends.ports.renderer import ICanvas2D
+
     from .queue import PrimitiveItem
 
 
-def draw_primitive(canvas: Any, item: PrimitiveItem) -> None:
+def draw_primitive(canvas: ICanvas2D, item: PrimitiveItem) -> None:
     """Draws a single ``PrimitiveItem`` onto ``canvas``.
 
     Args:

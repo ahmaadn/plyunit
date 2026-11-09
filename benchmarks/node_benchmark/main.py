@@ -8,6 +8,7 @@ import random
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pyray as pr
 
@@ -18,6 +19,9 @@ from benchmarks.report_paths import (
     write_text_report,
 )
 from plyunit.core.components.builtin import SpriteRenderer
+
+if TYPE_CHECKING:
+    from plyunit.backends.integrations.raylib.handler import Texture2D
 
 PROFILE_PASS_RATIO = {"strict": 0.95, "balanced": 0.90, "igpu": 0.80}
 _EPSILON = 1e-6
@@ -182,9 +186,12 @@ class StaticBenchNode(pu.NodeUnit):
 class NodeBenchmarkScene(pu.SceneUnit):
     def __init__(self, app: pu.App, config: BenchmarkConfig) -> None:
         super().__init__(name="node-tree-benchmark-scene")
+        from benchmarks.benchmark_root import BenchmarkRoot
+
+        self.root = BenchmarkRoot(self._submit_frame)
         self.app = app
         self.config = config
-        self.texture = None
+        self.texture: Texture2D | None = None
         self._text: pu.Text | None = None
         self.nodes_created = 0
         self.depth_actual = 0
@@ -207,9 +214,11 @@ class NodeBenchmarkScene(pu.SceneUnit):
         self._engine_profile_frames = 0
 
     def on_load(self) -> None:
+        from plyunit.backends.integrations.raylib.handler import Texture2D
+
         if self.config.seed is not None:
             random.seed(self.config.seed)
-        self.texture = pr.load_texture(self.config.texture_path)
+        self.texture = Texture2D.from_raw(pr.load_texture(self.config.texture_path))
         if self.config.overlay:
             self._text = pu.Text()
         self.profile_enabled = self.config.profile_engine
@@ -230,11 +239,11 @@ class NodeBenchmarkScene(pu.SceneUnit):
 
     def on_unload(self) -> None:
         if self.texture is not None:
-            pr.unload_texture(self.texture)
+            pr.unload_texture(self.texture.raw_texture)
             self.texture = None
         gc.unfreeze()
 
-    def render_submit(self, renderer) -> None:
+    def _submit_frame(self, renderer) -> None:
         now = time.perf_counter()
         if self._last_frame_time is not None:
             self._collect_metrics(now, max(_EPSILON, now - self._last_frame_time))
@@ -365,7 +374,7 @@ class NodeBenchmarkScene(pu.SceneUnit):
             )
         node.layer = int(pu.Layer.ENTITIES)
         node.z_index = 0
-        # pyrefly: ignore [missing-attribute]
+        assert self.texture is not None, "benchmark texture was not initialized"
         scale = self.config.sprite_size / max(1.0, float(self.texture.width))
         node.add_component(
             SpriteRenderer(
@@ -457,7 +466,7 @@ class NodeBenchmarkApp(pu.App):
         _ = dt
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((245, 245, 245, 255))
+        self.window.clear_background(self.benchmark_config.background_color)
         self.scene_manager.render(self.renderer)
         self.renderer.flush_all()
         self.window.end_drawing()
@@ -601,7 +610,6 @@ def run_benchmark(config: BenchmarkConfig) -> BenchmarkResult:
             fixed_update_hz=config.fixed_update_hz,
             max_frame_delta_time=config.max_frame_delta_time,
             max_substeps_per_frame=config.max_substeps_per_frame,
-            background_color=config.background_color,
         ),
     )
     start = time.perf_counter()

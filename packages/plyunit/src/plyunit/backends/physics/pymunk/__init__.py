@@ -70,6 +70,4 @@ __all__ = [
     "SegmentShape",
     # Static World
     "StaticBody",
-    # Factory
-    "build_physics_service",
 ]

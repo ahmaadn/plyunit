@@ -13,72 +13,47 @@ window/raylib.
 """
 
 from __future__ import annotations
-from plyunit.tilemap.tilemap import parse_map_config
 
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
+from engine.tilemap._fakes import FakeCanvas, make_assets, make_texture
 
-from plyunit.assets.types import TextureData
-from plyunit.tilemap.tilemap import TileMapNode
+from plyunit.tilemap.tilemap import TileMapNode, parse_map_config
 
 TILE = 16
 CHUNK = 2
 BIG_W, BIG_H = 100.0, 90.0
 
 
-class FakeCanvas:
-    """Fake canvas that records draw calls, without a GPU."""
-
-    def __init__(self) -> None:
-        self.loads: list[tuple[int, int]] = []
-        self.draws: list[tuple] = []
-
-    def load_render_texture(self, w, h):
-        self.loads.append((w, h))
-        return SimpleNamespace(id=len(self.loads), texture=SimpleNamespace(
-            width=w, height=h
-        ))
-
-    def unload_render_texture(self, target):
-        pass
-
-    def begin_texture_mode(self, target):
-        pass
-
-    def end_texture_mode(self):
-        pass
-
-    def clear_transparent(self):
-        pass
-
-    def draw_texture_region(self, texture, source, dest):
-        self.draws.append((source, dest))
-
-    def set_texture_filter(self, target, filter_mode="trilinear"):
-        pass
-
-
 def make_node(sizes: dict[str, tuple[float, float]], layers: dict) -> TileMapNode:
-    """Build a node with the given asset sizes and layer metadata."""
+    """Build a node with region handles and layer metadata.
+
+    Args:
+        sizes: Logical asset IDs mapped to each region's native size.
+        layers: Metadata for the map's layers.
+
+    Returns:
+        An unready tilemap using a headless asset port and canvas.
+    """
     regions = {
-        alias: TextureData(
-            id=alias,
+        alias: make_texture(
+            alias,
+            256,
+            128,
             parent_id="sheet",
-            texture=MagicMock(name=alias),
-            source_rect=(0.0, 0.0, w, h),
+            source_rect=(32.0, 16.0, w, h),
         )
         for alias, (w, h) in sizes.items()
     }
-    assets = MagicMock()
-    assets.get_texture_data.side_effect = lambda alias: regions[alias]
+    assets = make_assets(regions)
     canvas = FakeCanvas()
 
     def _resolve(query, *args, **kwargs):
         if query == "@Renderer":
             return SimpleNamespace(canvas=canvas)
-        if "Asset" in str(query):
+        if query == "@Assets":
             return assets
         return None
 
@@ -88,17 +63,14 @@ def make_node(sizes: dict[str, tuple[float, float]], layers: dict) -> TileMapNod
     node._test_canvas = canvas
 
     tilesets = {
-        str(i): {"gid": i, "asset_id": alias}
-        for i, alias in enumerate(sizes, start=1)
+        str(i): {"gid": i, "asset_id": alias} for i, alias in enumerate(sizes, start=1)
     }
     node.config = parse_map_config({
         "settings": {"tile_size": [TILE, TILE], "chunk_size": CHUNK},
         "tilesets": tilesets,
         "layers": layers,
-        # Cell (1,1) -> index 3. Cell menempati x 16..32, y 16..32.
-        "chunks": {
-            "0,0": {"chunk_x": 0, "chunk_y": 0, "layers": {"1": [0, 0, 0, 1]}}
-        },
+        # Cell (1,1) occupies x=16..32 and y=16..32.
+        "chunks": {"0,0": {"chunk_x": 0, "chunk_y": 0, "layers": {"1": [0, 0, 0, 1]}}},
     })
     node.tile_size = TILE
     node.chunk_size = CHUNK
@@ -106,7 +78,14 @@ def make_node(sizes: dict[str, tuple[float, float]], layers: dict) -> TileMapNod
 
 
 def submitted_tiles(node: TileMapNode) -> list[dict]:
-    """Jalankan ``render_submit`` dan kembalikan kwargs tiap ``render_sprite``."""
+    """Collect world-space sprite submissions without a camera.
+
+    Args:
+        node: Ready tilemap to render.
+
+    Returns:
+        Keyword arguments for each sprite submission.
+    """
     queue = MagicMock()
     node.one_or_none = MagicMock(return_value=None)
     node.render_submit(queue)
@@ -182,7 +161,7 @@ class TestTilesModeBottomLeftAnchor:
         assert (x + w / 2.0, y + h / 2.0) != cell_center
 
     def test_cell_sized_tile_unchanged(self, tiles_layer) -> None:
-        """A 16x16 tile still produces the legacy rect (compatibility)."""
+        """A cell-sized region aligns with its grid cell."""
         node = make_node({"grass": (16.0, 16.0)}, tiles_layer)
         node.on_ready()
         assert submitted_tiles(node)[0]["dest"] == (16.0, 16.0, 16.0, 16.0)
@@ -218,7 +197,7 @@ class TestBakedModeRoutesOversizedOut:
     def test_baked_dest_rect_unchanged(self, baked_layer) -> None:
         node = make_node({"grass": (16.0, 16.0)}, baked_layer)
         node.on_ready()
-        _, dest = node._test_canvas.draws[0]
+        _, _, dest = node._test_canvas.draws[0]
         assert tuple(float(v) for v in dest) == (16.0, 16.0, 16.0, 16.0)
 
 
@@ -272,3 +251,48 @@ class TestGidEntryFlag:
         node.on_ready()
         assert node._gid_map[1].oversized is False
 
+
+def test_mixed_baked_layer_submits_opaque_oversized_handle(baked_layer) -> None:
+    node = make_node({"grass": (16.0, 16.0), "tree": (BIG_W, BIG_H)}, baked_layer)
+    assert node.config is not None
+    node.config.chunks["0,0"].raw_layers["1"] = [1, 0, 0, 2]
+    node.on_ready()
+    grass = node._gid_map[1].texture
+    tree = node._gid_map[2].texture
+    target = node._baked_render[("0,0", "1")]
+
+    tiles = submitted_tiles(node)
+
+    assert len(node._test_canvas.draws) == 1
+    assert node._test_canvas.draws[0][0] is grass
+    assert len(tiles) == 2
+    assert tiles[0]["texture"] is target.texture
+    assert tiles[1]["texture"] is tree
+    assert tiles[1]["source"] == tree.source_rect
+    assert tiles[1]["dest"] == (16.0, -58.0, BIG_W, BIG_H)
+    assert tiles[1]["z"] == tiles[0]["z"] + 1
+
+
+@pytest.mark.parametrize("render_mode", ["tiles", "baked"])
+@pytest.mark.parametrize("view", [(96.0, 0.0, 112.0, 16.0), (16.0, -64.0, 32.0, -48.0)])
+def test_overhang_keeps_offscreen_owning_chunk_visible(
+    render_mode: str, view: tuple[float, float, float, float]
+) -> None:
+    node = make_node({"tree": (BIG_W, BIG_H)}, {"1": {"render_mode": render_mode}})
+    node.margin_chunks = 0
+    node.on_ready()
+    camera = MagicMock()
+    camera.get_view_rect.return_value = view
+    node.one_or_none = MagicMock(
+        side_effect=lambda query, **kwargs: camera if query == "@Camera2D" else None
+    )
+    renderer = MagicMock()
+
+    assert node._visible_chunk_keys() == {"0,0"}
+    node.render_submit(renderer)
+
+    renderer.render_sprite.assert_called_once()
+    assert (
+        renderer.render_sprite.call_args.kwargs["texture"] is node._gid_map[1].texture
+    )
+    assert node._test_canvas.loads == []

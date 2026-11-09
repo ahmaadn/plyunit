@@ -1,8 +1,8 @@
 """AnimationController component (plays AnimationClips on a SpriteRenderer)."""
 
-from plyunit.assets.animations import AnimationClip, Animations
 from plyunit.core.components.component import Component
 from plyunit.events import Signal
+from plyunit.services.animations import AnimationClip, Animations
 
 
 class AnimationController(Component):

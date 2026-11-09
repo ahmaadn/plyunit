@@ -4,7 +4,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.canvas as Canvas
+from plyunit.backends.integrations.raylib.handler import RenderTexture, Shader, Texture2D
+import plyunit.backends.integrations.raylib.renderer.canvas as Canvas
 
 
 @pytest.fixture()
@@ -96,7 +97,7 @@ def fake_pr(monkeypatch: pytest.MonkeyPatch):
         rl_scalef=rec,
         get_screen_width=lambda: 800,
         get_screen_height=lambda: 600,
-        gui_get_font=lambda: SimpleNamespace(name="default"),
+        get_font_default=lambda: SimpleNamespace(name="default"),
         draw_circle_sector=rec,
         draw_circle_sector_lines=rec,
     )
@@ -147,7 +148,7 @@ def test_canvas_many_draw_paths(fake_pr):
         center=(0, 0), sides=6, radius=10, color=(1, 1, 1, 255), outline_only=True
     )
     Canvas.draw_text(text="hi", pos=(0, 0), font_size=12, color=(255, 255, 255, 255))
-    tex = SimpleNamespace(id=1, width=16, height=16)
+    tex = Texture2D.from_raw(SimpleNamespace(id=1, width=16, height=16, format=7))
     # pyrefly: ignore [bad-argument-type]
     Canvas.draw_texture(texture=tex, pos=(0, 0))
     # pyrefly: ignore [bad-argument-type]
@@ -161,9 +162,9 @@ def test_canvas_many_draw_paths(fake_pr):
     Canvas.begin_blend_mode(1)
     Canvas.end_blend_mode()
     # pyrefly: ignore [bad-argument-type]
-    Canvas.begin_shader_mode(SimpleNamespace(id=1))
+    Canvas.begin_shader_mode(Shader(SimpleNamespace(id=1)))
     Canvas.end_shader_mode()
     # pyrefly: ignore [bad-argument-type]
-    Canvas.begin_texture_mode(SimpleNamespace(id=2))
+    Canvas.begin_texture_mode(RenderTexture(SimpleNamespace(id=2)))
     Canvas.end_texture_mode()
     assert len(calls) > 10

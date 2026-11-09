@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import plyunit as pu
 from plyunit.core.units.node_unit import NodeUnit
-from plyunit.services.spatial.spatial_index import SpatialIndex
+from packages.plyunit.src.plyunit.services.spatial_index import SpatialIndex
 
 
 class _FakeRenderer:

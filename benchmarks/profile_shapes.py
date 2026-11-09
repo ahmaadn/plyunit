@@ -8,6 +8,7 @@ Three microbenchmarks:
 
 from __future__ import annotations
 
+import argparse
 import cProfile
 import gc
 import pstats
@@ -31,22 +32,23 @@ def setup_app():
     pr.init_window(1280, 720, "Profile Shapes")
     pr.set_target_fps(0)  # Uncapped
 
-    # Import canvas and UBR
-    from plyunit.backends.integrations.raylib.drawing import (
-        get_batching_backend,
-        get_canvas,
-    )
-
-    canvas = get_canvas()
-    ubr = get_batching_backend()
-
-    renderer = pu.Renderer(canvas=canvas, ubr=ubr, max_sprites=4096)
-    renderer.init()
+    try:
+        canvas = pu.Canvas2D()
+        ubr = pu.UnifiedBufferBatch()
+        renderer = pu.Renderer(canvas=canvas, ubr=ubr, max_sprites=4096)
+        renderer.init()
+    except BaseException:
+        pr.close_window()
+        raise
     return renderer
 
 
-def teardown_app():
-    pr.close_window()
+def teardown_app(renderer: pu.Renderer) -> None:
+    """Release native batch resources before closing their graphics context."""
+    try:
+        renderer.shutdown()
+    finally:
+        pr.close_window()
 
 
 def generate_test_data(n: int):
@@ -70,7 +72,7 @@ def generate_test_data(n: int):
 
 def bench_gpu_only(data, renderer):
     """GPU-only: Pre-convert once, then measure raw draw throughput."""
-    from plyunit.backends.integrations.raylib.drawing.canvas import to_color, to_vec2
+    from plyunit.backends.integrations.raylib.renderer.canvas import to_color, to_vec2
 
     # Pre-convert all data once (amortized cost)
     v1_list = [to_vec2(data["v1"][i]) for i in range(SHAPES)]
@@ -110,7 +112,7 @@ def bench_gpu_only(data, renderer):
 
 def bench_cpu_only(data, renderer):
     """CPU-only: Full submit pipeline without actual GPU draw."""
-    from plyunit.backends.integrations.raylib.drawing.canvas import to_color, to_vec2
+    from plyunit.backends.integrations.raylib.renderer.canvas import to_color, to_vec2
 
     gc.collect()
 
@@ -144,7 +146,7 @@ def bench_cpu_only(data, renderer):
 
 
 def bench_full_pipeline(data, renderer):
-    """Full pipeline: submit -> dispatch -> convert -> draw."""
+    """Full pipeline: queue canvas callbacks, then convert and draw."""
     gc.collect()
 
     # Warmup
@@ -222,7 +224,12 @@ def run_cprofile_full(data, renderer):
     return stream.getvalue()
 
 
-def main():
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Profile shape drawing with bounded warmup and measurement frames."
+    )
+    parser.parse_args(argv)
+
     print("=== Shapes Drawing Profiler ===")
     print(f"Shapes: {SHAPES}")
     print(f"Warmup: {WARMUP_FRAMES} frames")
@@ -230,9 +237,8 @@ def main():
     print()
 
     renderer = setup_app()
-    data = generate_test_data(SHAPES)
-
     try:
+        data = generate_test_data(SHAPES)
         # 1. GPU-only (fill rate)
         print("[1/4] Running GPU-only benchmark...")
         result_gpu = bench_gpu_only(data, renderer)
@@ -291,7 +297,7 @@ def main():
             print("  -> CPU optimization won't help much; GPU-bound")
 
     finally:
-        teardown_app()
+        teardown_app(renderer)
 
     return 0
 

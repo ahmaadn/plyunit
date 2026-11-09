@@ -1,6 +1,6 @@
-"""Namespace for plyunit engine services.
+"""Backend-neutral engine services and shared service data.
 
-Subpackages under this namespace: ``spatial``, ``timers``, ``tween``, etc.
-Services created after ``App`` is active are managed automatically by the
-global registry.
+Concrete backend services live under ``backends.integrations`` and implement
+contracts in ``backends.ports``. Services attach to the active application
+through the global unit registry.
 """

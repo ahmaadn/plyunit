@@ -4,14 +4,14 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.gl_ffi as gl_ffi
-import plyunit.backends.integrations.raylib.drawing.stencil as stencil_mod
+import plyunit.backends.integrations.raylib.renderer.gl_ffi as gl_ffi
+import plyunit.backends.integrations.raylib.renderer.stencil as stencil_mod
 from plyunit.rendering.draw_scope import DrawScope
-import plyunit.backends.integrations.raylib.drawing.canvas as Canvas
+from plyunit.backends.integrations.raylib.renderer import canvas as Canvas
 
 
 def test_canvas_stencil_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
-    import plyunit.backends.integrations.raylib.drawing.canvas as Canvas
+    from plyunit.backends.integrations.raylib.renderer import canvas as Canvas
 
     calls: list[str] = []
     monkeypatch.setattr(
@@ -164,7 +164,7 @@ def test_stencil_init_idempotent(monkeypatch: pytest.MonkeyPatch) -> None:
         "ffi",
         SimpleNamespace(
             NULL=None,
-            cast=lambda signature, addr: lambda *a, **k: None,
+            cast=lambda signature, addr: 1234 if signature == "uintptr_t" else lambda *a, **k: None,
         ),
         raising=False,
     )

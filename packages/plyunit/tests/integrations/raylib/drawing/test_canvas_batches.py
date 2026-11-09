@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.canvas as Canvas
+import plyunit.backends.integrations.raylib.renderer.canvas as Canvas
 
 
 @pytest.fixture()

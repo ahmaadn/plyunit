@@ -2,7 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.drawing.canvas as canvas_module
+from plyunit.backends.integrations.raylib.handler import RenderTexture, Shader
+import plyunit.backends.integrations.raylib.renderer.canvas as canvas_module
 
 Canvas = canvas_module
 
@@ -62,7 +63,8 @@ def test_canvas_draw_circle_variations(monkeypatch: pytest.MonkeyPatch) -> None:
     # Gradient
     canvas.draw_circle(center=(0, 0), radius=10, gradient_outer=(255, 0, 0, 255))
     assert len(calls["draw_circle_gradient"]) == 1
-    assert len(calls["draw_circle_gradient"][0]) == 4
+    assert len(calls["draw_circle_gradient"][0]) == 5
+    assert calls["draw_circle_gradient"][0][:3] == (0, 0, 10)
 
     # Outline only
     canvas.draw_circle(center=(0, 0), radius=10, outline_only=True)
@@ -210,10 +212,10 @@ def test_canvas_draw_pixel(monkeypatch: pytest.MonkeyPatch) -> None:
     canvas = Canvas
 
     canvas.draw_pixel(pos=(1, 2))
-    assert len(calls["draw_pixel"]) == 1
+    assert len(calls["draw_pixel_v"]) == 1
     # pyrefly: ignore [bad-argument-type]
     canvas.draw_pixel(pos=FakeVector2(1, 2))
-    assert len(calls["draw_pixel_v"]) == 1
+    assert len(calls["draw_pixel_v"]) == 2
 
 def test_canvas_gpu_state_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, list] = {
@@ -258,14 +260,14 @@ def test_canvas_gpu_state_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     assert len(calls["begin_blend_mode"]) == 1
     assert len(calls["end_blend_mode"]) == 1
 
-    shader = SimpleNamespace()
+    shader = Shader(SimpleNamespace(id=2))
     # pyrefly: ignore [bad-argument-type]
     canvas.begin_shader_mode(shader)
     canvas.end_shader_mode()
     assert len(calls["begin_shader_mode"]) == 1
     assert len(calls["end_shader_mode"]) == 1
 
-    texture = SimpleNamespace()
+    texture = RenderTexture(SimpleNamespace())
     # pyrefly: ignore [bad-argument-type]
     canvas.begin_texture_mode(texture)
     canvas.end_texture_mode()

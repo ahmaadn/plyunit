@@ -11,7 +11,7 @@ import logging
 
 import pyray as pr
 
-from plyunit.backends.interfaces.i_input import ITouch
+from plyunit.backends.ports.input import ITouch
 from plyunit.core.units.service_unit import ServiceUnit
 
 __all__ = ("Touch",)

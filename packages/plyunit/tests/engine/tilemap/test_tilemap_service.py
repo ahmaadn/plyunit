@@ -1,70 +1,38 @@
-from plyunit.tilemap.tilemap import parse_map_config
+from __future__ import annotations
+
 import json
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
+from engine.tilemap._fakes import (
+    FakeCanvas,
+    FakeRenderTexture,
+    gid_entry,
+    make_assets,
+    make_texture,
+)
 
-from plyunit.assets.assets import Assets
-from plyunit.assets.types import TextureData
-from plyunit.tilemap.tilemap import TileMapNode
+from plyunit.tilemap.tilemap import TileMapNode, parse_map_config
 
 
 @pytest.fixture
 def mock_assets():
-    assets = MagicMock(spec=Assets)
-
-    # Mock regions
-    # "grass", "water", "tree"
-    t1 = TextureData(id="grass", parent_id="terrain", texture=MagicMock(), source_rect=(0, 0, 16, 16))
-    t2 = TextureData(id="water", parent_id="terrain", texture=MagicMock(), source_rect=(16, 0, 16, 16))
-    t3 = TextureData(id="tree", parent_id="terrain", texture=MagicMock(), source_rect=(32, 0, 16, 16))
-
-    assets._regions = {
-        "grass": t1,
-        "water": t2,
-        "tree": t3,
+    regions = {
+        alias: make_texture(
+            alias,
+            256,
+            128,
+            parent_id="terrain",
+            source_rect=(float(i * 16), 0.0, 16.0, 16.0),
+        )
+        for i, alias in enumerate(("grass", "water", "tree"))
     }
-
-    def fake_get_texture_data(alias):
-        return assets._regions.get(alias)
-
-    assets.get_texture_data.side_effect = fake_get_texture_data
-    return assets
+    return make_assets(regions)
 
 
 @pytest.fixture
 def tilemap_service(mock_assets):
-    # Inject fake canvas (via fake Renderer query one) so tests do not need
-    # real pyray.
-    class FakeCanvas:
-        def __init__(self):
-            self.loads = []
-            self.draws = []
-
-        def load_render_texture(self, w, h):
-            t = MagicMock()
-            self.loads.append((w, h))
-            return t
-
-        def unload_render_texture(self, target):
-            pass
-
-        def begin_texture_mode(self, target):
-            pass
-
-        def end_texture_mode(self):
-            pass
-
-        def clear_transparent(self):
-            pass
-
-        def draw_texture_region(self, texture, source, dest):
-            self.draws.append((texture, source, dest))
-
-        def set_texture_filter(self, target, filter_mode="trilinear"):
-            pass
-
     canvas = FakeCanvas()
     service = TileMapNode()
     service._test_canvas = canvas
@@ -73,9 +41,7 @@ def tilemap_service(mock_assets):
         # Canvas via Renderer; Assets for GID resolution; others absent.
         if query == "@Renderer":
             return SimpleNamespace(canvas=canvas)
-        if query in (Assets, "@Assets") or (
-            isinstance(query, str) and "Asset" in query
-        ):
+        if query == "@Assets":
             return mock_assets
         return None
 
@@ -88,7 +54,14 @@ def test_tilemap_service_load_map(tilemap_service, tmp_path):
     map_config = {
         "settings": {"tile_size": [16, 16], "chunk_size": 8},
         "tilesets": {"1": {"gid": 1, "asset_id": "terrain"}},
-        "chunks": {"0,0": {"chunk_x": 0, "chunk_y": 0, "layers": {"1": [1, 2, 3]}, "baked_physics": {}}},
+        "chunks": {
+            "0,0": {
+                "chunk_x": 0,
+                "chunk_y": 0,
+                "layers": {"1": [1, 2, 3]},
+                "baked_physics": {},
+            }
+        },
     }
 
     config_file = tmp_path / "map.json"
@@ -104,26 +77,24 @@ def test_tilemap_service_load_map(tilemap_service, tmp_path):
 
 
 def test_tilemap_service_on_ready_and_baking(tilemap_service):
-    tilemap_service.config = parse_map_config(
-        {
-            "settings": {"tile_size": [16, 16], "chunk_size": 2},
-            "tilesets": {
-                "1": {"gid": 1, "asset_id": "grass"},
-                "2": {"gid": 2, "asset_id": "water"},
-                "3": {"gid": 3, "asset_id": "tree"},
-            },
-            "chunks": {
-                "0,0": {
-                    "chunk_x": 0,
-                    "chunk_y": 0,
-                    "layers": {
-                        "1": [1, 2, 0, 3],  # 4 tiles for 2x2 chunk
-                        "2": [0, 0, 3, 0],  # Prop layer (should not be baked)
-                    },
-                }
-            },
-        }
-    )
+    tilemap_service.config = parse_map_config({
+        "settings": {"tile_size": [16, 16], "chunk_size": 2},
+        "tilesets": {
+            "1": {"gid": 1, "asset_id": "grass"},
+            "2": {"gid": 2, "asset_id": "water"},
+            "3": {"gid": 3, "asset_id": "tree"},
+        },
+        "chunks": {
+            "0,0": {
+                "chunk_x": 0,
+                "chunk_y": 0,
+                "layers": {
+                    "1": [1, 2, 0, 3],  # 4 tiles for 2x2 chunk
+                    "2": [0, 0, 3, 0],  # Prop layer (should not be baked)
+                },
+            }
+        },
+    })
 
     tilemap_service.chunk_size = 2
     tilemap_service.tile_size = 16
@@ -142,36 +113,28 @@ def test_tilemap_service_on_ready_and_baking(tilemap_service):
 
 
 def test_tilemap_service_render_submit(tilemap_service):
-    tilemap_service.config = parse_map_config(
-        {
-            "settings": {"tile_size": [16, 16], "chunk_size": 2},
-            "layers": {
-                "1": {"name": "Base", "y_sort_enabled": False},
-                "2": {"name": "Props", "y_sort_enabled": False},
-            },
-            "chunks": {
-                "0,0": {
-                    "chunk_x": 0,
-                    "chunk_y": 0,
-                    "layers": {"1": [1, 1, 1, 1], "2": [0, 0, 3, 0]},
-                }
-            },
-        }
-    )
+    tilemap_service.config = parse_map_config({
+        "settings": {"tile_size": [16, 16], "chunk_size": 2},
+        "layers": {
+            "1": {"name": "Base", "y_sort_enabled": False},
+            "2": {"name": "Props", "y_sort_enabled": False},
+        },
+        "chunks": {
+            "0,0": {
+                "chunk_x": 0,
+                "chunk_y": 0,
+                "layers": {"1": [1, 1, 1, 1], "2": [0, 0, 3, 0]},
+            }
+        },
+    })
     tilemap_service.chunk_size = 2
     tilemap_service.tile_size = 16
 
-    # Inject baked chunk layer 1
-    mock_texture = SimpleNamespace(width=32, height=32)
-    tilemap_service._baked_render[("0,0", "1")] = SimpleNamespace(
-        texture=mock_texture
-    )
-
-    # Inject GID
-    tilemap_service._gid_map[3] = SimpleNamespace(
-        texture=MagicMock(),
-        source_rect=(0, 0, 16, 16),
-    )
+    # Inject baked chunk layer 1 and a borrowed prop handle.
+    mock_texture = make_texture("baked", 32, 32)
+    tilemap_service._baked_render[("0,0", "1")] = FakeRenderTexture(mock_texture)
+    prop_texture = make_texture("tree")
+    tilemap_service._gid_map[3] = gid_entry(prop_texture)
 
     queue = MagicMock()
 
@@ -186,13 +149,15 @@ def test_tilemap_service_render_submit(tilemap_service):
 
     # Call 1 (Baked chunk)
     _, kwargs1 = queue.render_sprite.call_args_list[0]
+    assert kwargs1["texture"] is mock_texture
     assert kwargs1["z"] == -1000
-    assert kwargs1["source"] == (0, 0, 32, -32)
+    assert kwargs1["source"] == (0, 32, 32, -32)
     assert kwargs1["dest"] == (0, 0, 32, 32)
 
     # Call 2 (Prop tile flat: y_sort_enabled default False)
     # index 2 -> row 1, col 0 -> y=16; z = layer*100 + z_offset only
     _, kwargs2 = queue.render_sprite.call_args_list[1]
+    assert kwargs2["texture"] is prop_texture
     assert kwargs2["z"] == 200
     assert kwargs2["y_sort"] is False
     assert kwargs2["y_sort_origin"] == 0.0
@@ -200,32 +165,25 @@ def test_tilemap_service_render_submit(tilemap_service):
 
 
 def test_tilemap_prop_layer_y_sort_enabled(tilemap_service):
-    tilemap_service.config = parse_map_config(
-        {
-            "settings": {"tile_size": [16, 16], "chunk_size": 2},
-            "layers": {
-                "1": {"name": "Base"},
-                "2": {"name": "Props", "y_sort_enabled": True},
-            },
-            "chunks": {
-                "0,0": {
-                    "chunk_x": 0,
-                    "chunk_y": 0,
-                    "layers": {"1": [1, 1, 1, 1], "2": [0, 0, 3, 0]},
-                }
-            },
-        }
-    )
+    tilemap_service.config = parse_map_config({
+        "settings": {"tile_size": [16, 16], "chunk_size": 2},
+        "layers": {
+            "1": {"name": "Base"},
+            "2": {"name": "Props", "y_sort_enabled": True},
+        },
+        "chunks": {
+            "0,0": {
+                "chunk_x": 0,
+                "chunk_y": 0,
+                "layers": {"1": [1, 1, 1, 1], "2": [0, 0, 3, 0]},
+            }
+        },
+    })
     tilemap_service.chunk_size = 2
     tilemap_service.tile_size = 16
-    mock_texture = SimpleNamespace(width=32, height=32)
-    tilemap_service._baked_render[("0,0", "1")] = SimpleNamespace(
-        texture=mock_texture
-    )
-    tilemap_service._gid_map[3] = SimpleNamespace(
-        texture=MagicMock(),
-        source_rect=(0, 0, 16, 16),
-    )
+    mock_texture = make_texture("baked", 32, 32)
+    tilemap_service._baked_render[("0,0", "1")] = FakeRenderTexture(mock_texture)
+    tilemap_service._gid_map[3] = gid_entry(make_texture("tree"))
     queue = MagicMock()
     tilemap_service.one_or_none = MagicMock(return_value=None)
     tilemap_service.render_submit(queue)
@@ -238,34 +196,32 @@ def test_tilemap_prop_layer_y_sort_enabled(tilemap_service):
 
 
 def test_tilemap_layer_render_mode_baked(tilemap_service):
-    tilemap_service.config = parse_map_config(
-        {
-            "settings": {"tile_size": [16, 16], "chunk_size": 2},
-            "tilesets": {
-                "1": {"gid": 1, "asset_id": "grass"},
-                "3": {"gid": 3, "asset_id": "tree"},
+    tilemap_service.config = parse_map_config({
+        "settings": {"tile_size": [16, 16], "chunk_size": 2},
+        "tilesets": {
+            "1": {"gid": 1, "asset_id": "grass"},
+            "3": {"gid": 3, "asset_id": "tree"},
+        },
+        "layers": {
+            "1": {"name": "Base", "render_mode": "auto"},
+            "2": {
+                "name": "Roof",
+                "render_mode": "baked",
+                "y_sort_enabled": False,
+                "z_offset": 5,
             },
-            "layers": {
-                "1": {"name": "Base", "render_mode": "auto"},
-                "2": {
-                    "name": "Roof",
-                    "render_mode": "baked",
-                    "y_sort_enabled": False,
-                    "z_offset": 5,
+        },
+        "chunks": {
+            "0,0": {
+                "chunk_x": 0,
+                "chunk_y": 0,
+                "layers": {
+                    "1": [1, 1, 1, 1],
+                    "2": [0, 0, 3, 0],
                 },
-            },
-            "chunks": {
-                "0,0": {
-                    "chunk_x": 0,
-                    "chunk_y": 0,
-                    "layers": {
-                        "1": [1, 1, 1, 1],
-                        "2": [0, 0, 3, 0],
-                    },
-                }
-            },
-        }
-    )
+            }
+        },
+    })
     tilemap_service.chunk_size = 2
     tilemap_service.tile_size = 16
     tilemap_service.on_ready()
@@ -284,35 +240,30 @@ def test_tilemap_layer_render_mode_baked(tilemap_service):
 
 
 def test_tilemap_baked_clamped_by_y_sort(tilemap_service):
-    tilemap_service.config = parse_map_config(
-        {
-            "settings": {"tile_size": [16, 16], "chunk_size": 2},
-            "layers": {
-                "1": {"name": "Base"},
-                "2": {
-                    "name": "Props",
-                    "render_mode": "baked",
-                    "y_sort_enabled": True,
-                },
+    tilemap_service.config = parse_map_config({
+        "settings": {"tile_size": [16, 16], "chunk_size": 2},
+        "layers": {
+            "1": {"name": "Base"},
+            "2": {
+                "name": "Props",
+                "render_mode": "baked",
+                "y_sort_enabled": True,
             },
-            "chunks": {
-                "0,0": {
-                    "chunk_x": 0,
-                    "chunk_y": 0,
-                    "layers": {"1": [1, 1, 1, 1], "2": [0, 0, 3, 0]},
-                }
-            },
-        }
-    )
+        },
+        "chunks": {
+            "0,0": {
+                "chunk_x": 0,
+                "chunk_y": 0,
+                "layers": {"1": [1, 1, 1, 1], "2": [0, 0, 3, 0]},
+            }
+        },
+    })
     tilemap_service.chunk_size = 2
     tilemap_service.tile_size = 16
-    tilemap_service._baked_render[("0,0", "1")] = SimpleNamespace(
-        texture=SimpleNamespace(width=32, height=32)
+    tilemap_service._baked_render[("0,0", "1")] = FakeRenderTexture(
+        make_texture("baked", 32, 32)
     )
-    tilemap_service._gid_map[3] = SimpleNamespace(
-        texture=MagicMock(),
-        source_rect=(0, 0, 16, 16),
-    )
+    tilemap_service._gid_map[3] = gid_entry(make_texture("tree"))
     assert tilemap_service._effective_render_mode("2") == "tiles"
 
     queue = MagicMock()
@@ -323,36 +274,32 @@ def test_tilemap_baked_clamped_by_y_sort(tilemap_service):
 
 
 def test_parse_map_type_isometric_normalized(tilemap_service):
-    cfg = parse_map_config(
-        {
-            "map_type": "isometric",
-            "settings": {"tile_size": [16, 16], "chunk_size": 2},
-            "chunks": {},
-        }
-    )
+    cfg = parse_map_config({
+        "map_type": "isometric",
+        "settings": {"tile_size": [16, 16], "chunk_size": 2},
+        "chunks": {},
+    })
     assert cfg.map_type == "orthogonal"
 
 
 def test_tilemap_service_render_submit_culling(tilemap_service):
-    tilemap_service.config = parse_map_config(
-        {
-            "settings": {"tile_size": [16, 16], "chunk_size": 2},  # 32x32 pixels per chunk
-            "chunks": {
-                "0,0": {"chunk_x": 0, "chunk_y": 0, "layers": {"1": [1]}},
-                "10,10": {"chunk_x": 10, "chunk_y": 10, "layers": {"1": [1]}},
-            },
-        }
-    )
+    tilemap_service.config = parse_map_config({
+        # Each chunk covers 32x32 pixels.
+        "settings": {"tile_size": [16, 16], "chunk_size": 2},
+        "chunks": {
+            "0,0": {"chunk_x": 0, "chunk_y": 0, "layers": {"1": [1]}},
+            "10,10": {"chunk_x": 10, "chunk_y": 10, "layers": {"1": [1]}},
+        },
+    })
     tilemap_service.chunk_size = 2
     tilemap_service.tile_size = 16
 
     # Full-bake path: RTs must exist before render_submit (O(1) get only).
-    mock_texture = SimpleNamespace(width=32, height=32)
-    tilemap_service._baked_render[("0,0", "1")] = SimpleNamespace(
-        texture=mock_texture
+    tilemap_service._baked_render[("0,0", "1")] = FakeRenderTexture(
+        make_texture("baked-near", 32, 32)
     )
-    tilemap_service._baked_render[("10,10", "1")] = SimpleNamespace(
-        texture=mock_texture
+    tilemap_service._baked_render[("10,10", "1")] = FakeRenderTexture(
+        make_texture("baked-far", 32, 32)
     )
     for chunk in tilemap_service.config.chunks.values():
         chunk.gid_arrays["1"] = [1]

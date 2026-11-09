@@ -1,12 +1,93 @@
-# Migration: App flow optimization (breaking)
+# Migration: hexagonal architecture and App flow (breaking)
 
-> **Breaking change — no compatibility path.** This migration removes
-> `late_update` at every level and removes the engine-owned render pipeline
-> from `App`. There is no deprecation period, no shim, and no dual-path
-> support. Code that relied on the old orchestration must be rewritten, not
-> patched.
+> **Breaking change — no compatibility path.** Backend-neutral code now
+> depends on `plyunit.backends.ports`, and concrete services/resources belong
+> to adapters. Removed imports, loaders, resource accessors, and primitive
+> submit methods have no aliases or shims. The App flow change also removes
+> `late_update` and the engine-owned render pipeline. Rewrite callers to the
+> current contracts; do not add a parallel legacy path.
 
-## What was removed
+## Hexagonal migration
+
+| Removed usage | Current contract |
+| --- | --- |
+| `plyunit.backends.interfaces` | `plyunit.backends.ports` |
+| Neutral code importing concrete backends or backend selectors | Inject ports; select implementations only at composition/facade boundaries |
+| Old top-level asset/audio packages or service loader folders | Neutral data in `plyunit.services`; concrete services in `plyunit.backends.integrations.raylib` |
+| Raw native resources or `from_raw` constructors in ports/core | Opaque handle contracts; concrete resources stay inside adapters |
+| `get_texture_data(id).texture` | `Assets.get_asset(id)` / `Assets[id]`, which returns the handle directly |
+| Treating `Texture2D.texture_id` as a GPU integer | Logical string asset ID; `IUnifiedBufferBatch.texture_id(handle)` resolves the numeric batch ID |
+| Adopting a render-target/font/stream attachment into `Assets` | Borrow the attachment and release its owner, never the attachment separately |
+| `Canvas` class usage or subclassing `Canvas2D` | `Canvas2D()` factory; annotate with `ICanvas2D` from ports |
+| `Input(gamepad=...)`, `map(..., buttons=...)`, pad fields in `map_axis` | Separate `Input` keyboard action map and `Gamepad` device service |
+| Implicit keyboard EventBus emission | Create `EventBus` first, then `Input(emit_to_bus=True)` and poll explicitly |
+| `Input.load` / `Input.save` | Application-owned binding serialization plus `map` / `map_axis` |
+| `build_physics_service` | Enable `PhysicsConfig` through `pu.init`, or inject a `PhysicsBackend` into `Physics` at the application boundary |
+| `AppConfig.background_color` | Pass the application's clear color to `window.clear_background` in `App.update` |
+| `SceneUnit.render_submit` | Attach a `NodeUnit` with `render_submit(renderer, context)` to the scene root |
+| `Renderer.render_rect/circle/line/triangle` and their plural variants | Cached `canvas.create_*` textures + sprite submits, or queued custom Canvas drawing |
+
+Neutral services/data now include `services/animations.py`,
+`services/assets/schemas.py`, `services/spatial_index.py`, `services/text.py`,
+and `services/shaders.py`. Concrete raylib services live under
+`backends/integrations/raylib`; its `handler.py` defines `Image`, `Texture2D`,
+`RenderTexture`, `Shader`, `Font`, and `StreamingTexture`. Game/core code uses
+handle contracts from `backends.ports.handler`, not those classes' raw fields.
+
+### Initialization and ownership
+
+`plyunit._bootstrap.init` injects adapters and services, then calls
+`app.init(cfg)` before constructing optional physics, ImGui, or audio services.
+`App.init` opens the window, sets up the injected default camera, and calls
+`Renderer.init()` only after a graphics context exists. The renderer
+constructor does not call `ubr.init()`.
+
+Load GPU assets and bake shapes in `on_load` / `on_ready`, after bootstrap.
+`Assets.store_texture` takes ownership only of standalone root textures;
+resolve the assigned asset ID again afterward. Previously captured asset
+handles become stale after reload, unload, or atlas packing.
+`render_target.texture`, `font.texture`, and `stream.texture` are borrowed
+and must remain with their owning render target, text service, or stream.
+Release owners after queued draws finish and before the window closes.
+
+### Reusable shapes
+
+Bake once, transfer ownership to `Assets`, then submit the cached handle each
+render frame:
+
+```python
+# App.on_load, after bootstrap.
+self.assets.store_texture(
+    "disc",
+    self.canvas.create_circle(radius=12.0, color=(255, 255, 255, 255)),
+)
+
+# App.update, after reset_frame and before flush_all.
+self.renderer.render_sprite(
+    texture=self.assets["disc"],
+    pos=(100.0, 100.0),
+    tint=(80, 200, 120, 255),
+    layer=pu.Layer.ENTITIES,
+)
+```
+
+For geometry whose outline changes every frame, or a debug overlay, queue a
+Canvas callback instead of baking a new texture each frame:
+
+```python
+self.renderer.render_custom(
+    draw_func=lambda canvas: canvas.draw_rectangle(
+        rect=(20.0, 20.0, 200.0 * self.hp_ratio, 16.0),
+        color=(220, 50, 50, 255),
+    ),
+    layer=pu.Layer.UI,
+)
+```
+
+The callback draws during flush; it must not submit more renderer work.
+Custom geometry does not participate in native sprite batching.
+
+## App flow APIs removed
 
 | Removed API | Replacement |
 | --- | --- |
@@ -23,14 +104,14 @@
 
 ## The new contract
 
-`App` owns frame timing and fixed-step scheduling only. It never touches
-`Camera2D`, `Renderer`, or the window drawing API. Two hooks are mandatory:
+During the main loop, `App` owns frame timing and fixed-step scheduling,
+not drawing. Initialization still opens the window and configures the injected
+camera and renderer through their ports. Two hooks define user-owned work:
 
 ```python
 class GameApp(pu.App):
     def on_load(self) -> None:
-        self.camera = pu.Camera2D((320, 180), (0, 0))
-        self.camera.setup(1280, 720)
+        # Bootstrap already injected and set up the default camera.
         self.scene_manager.push(MainScene())
 
     def fixed_update(self, dt: float, step: int) -> None:
@@ -43,7 +124,7 @@ class GameApp(pu.App):
         self.camera.update(self.window.unscaled_dt)
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background(self.config.background_color)
+        self.window.clear_background((24, 32, 48, 255))
         self.scene_manager.render(self.renderer)
         self.renderer.flush_all(camera=self.camera)
         self.window.end_drawing()
@@ -107,6 +188,10 @@ def update(self, dt: float) -> None:
 
 ## Reference
 
+- [architecture-layers.md](architecture-layers.md)
+- [architecture-hexagonal-audit.md](architecture-hexagonal-audit.md)
+- [input-and-events.md](input-and-events.md)
+- [rendering/queued-submit.md](rendering/queued-submit.md)
 - [frame-execution-order.md](frame-execution-order.md)
 - [engine-core.md](engine-core.md)
 - [imgui.md](imgui.md)

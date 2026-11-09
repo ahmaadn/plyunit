@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal
 
 import pyray as pr
 
-from plyunit.backends.interfaces import IMouse
+from plyunit.backends.ports.input import IMouse
 from plyunit.core.units.service_unit import ServiceUnit
 
 if TYPE_CHECKING:
@@ -28,7 +28,7 @@ __all__ = ("Mouse",)
 logger = logging.getLogger(__name__)
 
 
-UNKNOWN_CURSOR = "unknown"
+UNKNOWN_CURSOR: Literal["unknown"] = "unknown"
 
 # Mapping of mouse button names to ``pr.MouseButton`` constants. Each
 # key is a user-facing name string; each value is a raylib constant.

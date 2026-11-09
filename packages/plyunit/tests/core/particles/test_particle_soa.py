@@ -1,20 +1,22 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
 
 from plyunit.core.particles import Particle, ParticlePool
 
+from particle_fakes import make_texture
+
 
 class MockRenderer:
     def __init__(self) -> None:
-        self.circle_batches: list[dict] = []
+        self.custom: list[dict] = []
         self.sprites: list[dict] = []
 
-    def render_circles(self, **kwargs) -> None:
-        self.circle_batches.append(kwargs)
+    def render_custom(self, **kwargs) -> None:
+        self.custom.append(kwargs)
 
     def render_sprite(self, **kwargs) -> None:
         self.sprites.append(kwargs)
@@ -98,7 +100,7 @@ def test_spawn_reject_at_max_alive():
 
 
 def test_clear_resets_and_drops_texture_refs():
-    tex = SimpleNamespace(id=7)
+    tex = make_texture(7)
     pr = ParticlePool(None, initial_capacity=4, max_alive=8)
     pr.spawn(_p(texture=tex))
     assert pr.textures[0] is tex
@@ -110,8 +112,8 @@ def test_clear_resets_and_drops_texture_refs():
 def test_submit_partitions_circle_batch_and_sprites():
     renderer = MockRenderer()
     pr = ParticlePool(renderer, initial_capacity=8, max_alive=16)
-    tex_a = SimpleNamespace(id=1)
-    tex_b = SimpleNamespace(id=2)
+    tex_a = make_texture(1, texture_id="a")
+    tex_b = make_texture(2, texture_id="b")
     pr.spawn(_p(pos=(1.0, 1.0), size=2.0, tint=(10, 20, 30, 40)))
     pr.spawn(
         _p(
@@ -128,9 +130,12 @@ def test_submit_partitions_circle_batch_and_sprites():
 
     pr.submit(layer=99)
 
-    assert len(renderer.circle_batches) == 1
-    batch = renderer.circle_batches[0]
-    assert batch["layer"] == 99
+    assert len(renderer.custom) == 1
+    queued = renderer.custom[0]
+    assert queued["layer"] == 99
+    canvas = Mock()
+    queued["draw_func"](canvas)
+    batch = canvas.draw_circle_batch.call_args.kwargs
     assert len(batch["centers"]) == 2
     assert (1.0, 1.0) in batch["centers"]
     assert (7.0, 8.0) in batch["centers"]
@@ -138,14 +143,45 @@ def test_submit_partitions_circle_batch_and_sprites():
     assert len(batch["colors"]) == 2
 
     assert len(renderer.sprites) == 2
-    sprites_by_tex = {s["texture"].id: s for s in renderer.sprites}
-    assert sprites_by_tex[1]["pos"] == (3.0, 4.0)
-    assert sprites_by_tex[1]["source"] == (0.0, 0.0, 8.0, 8.0)
-    assert sprites_by_tex[1]["rotation"] == pytest.approx(12.0)
-    assert sprites_by_tex[1]["scale"] == pytest.approx(1.5)
-    assert sprites_by_tex[1]["tint"] == (1, 2, 3, 4)
-    assert sprites_by_tex[2]["pos"] == (5.0, 6.0)
-    assert sprites_by_tex[2]["source"] is None
+    sprites_by_tex = {s["texture"]: s for s in renderer.sprites}
+    assert sprites_by_tex[tex_a]["pos"] == (3.0, 4.0)
+    assert sprites_by_tex[tex_a]["source"] == (0.0, 0.0, 8.0, 8.0)
+    assert sprites_by_tex[tex_a]["rotation"] == pytest.approx(12.0)
+    assert sprites_by_tex[tex_a]["scale"] == pytest.approx(1.5)
+    assert sprites_by_tex[tex_a]["tint"] == (1, 2, 3, 4)
+    assert sprites_by_tex[tex_b]["pos"] == (5.0, 6.0)
+    assert sprites_by_tex[tex_b]["source"] is None
+
+
+def test_queued_circles_keep_geometry_when_staging_is_reused():
+    renderer = MockRenderer()
+    pool = ParticlePool(renderer, initial_capacity=4, max_alive=8)
+    pool.spawn(_p(pos=(1.0, 2.0), vel=(10.0, 0.0), size=3.0))
+    pool.submit(z=5, scissor=(0, 0, 20, 20))
+    pool.update(0.5)
+    pool.submit()
+    pool.clear()
+
+    canvas = Mock()
+    for queued in renderer.custom:
+        queued["draw_func"](canvas)
+    first, second = canvas.draw_circle_batch.call_args_list
+    assert first.kwargs["centers"] == ((1.0, 2.0),)
+    assert second.kwargs["centers"] == ((6.0, 2.0),)
+    assert first.kwargs["radii"] == (3.0,)
+    assert renderer.custom[0]["scissor"] == (0, 0, 20, 20)
+    assert renderer.custom[0]["z"] == 5
+
+
+def test_submit_groups_handles_by_identity_not_logical_id():
+    renderer = MockRenderer()
+    pool = ParticlePool(renderer)
+    first = make_texture(1, texture_id="shared")
+    second = make_texture(2, texture_id="shared")
+    for texture in (first, second, first):
+        pool.spawn(_p(texture=texture))
+    pool.submit()
+    assert [s["texture"] for s in renderer.sprites] == [first, first, second]
 
 
 def test_submit_noop_without_renderer_or_particles():
@@ -184,7 +220,7 @@ def test_tint_and_source_written():
     pr.spawn(
         _p(
             tint=(10, 20, 30, 40),
-            texture=object(),
+            texture=make_texture(),
             source_rect=(1.0, 2.0, 3.0, 4.0),
         )
     )

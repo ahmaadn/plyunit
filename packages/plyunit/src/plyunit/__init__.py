@@ -21,41 +21,32 @@ from plyunit._version import __version__ as __version__
 
 if TYPE_CHECKING:
     from plyunit._bootstrap import create_app, init
-    from plyunit.assets import (
-        AnimationClip as AnimationClip,
-        AnimationFrame as AnimationFrame,
-        Animations as Animations,
-        Assets as Assets,
-        ShaderHandle as ShaderHandle,
-        Shaders as Shaders,
+    from plyunit._enums import (
         ShaderUniform as ShaderUniform,
-        TemplateText as TemplateText,
-        Text as Text,
+        TextureFilter as TextureFilter,
+        TextureWrap as TextureWrap,
     )
-    from plyunit.audio import (
-        Audio as Audio,
-        AudioBackend as AudioBackend,
-        IAudioBackend as IAudioBackend,
-        VoiceId as VoiceId,
-        compute_spatial as compute_spatial,
-    )
-    from plyunit.backends import interfaces as interfaces
+    from plyunit.backends import ports as ports
     from plyunit.backends.imgui import (
         ImGui as ImGui,
         ImGuiBackend as ImGuiBackend,
         build_imgui_service as build_imgui_service,
     )
     from plyunit.backends.integrations import (
-        AssetsLoader as AssetsLoader,
-        BatchingBackend as BatchingBackend,
+        Assets as Assets,
+        Audio as Audio,
         Camera2D as Camera2D,
-        Canvas as Canvas,
-        Font as Font,
-        ShaderLoader as ShaderLoader,
+        Canvas2D as Canvas2D,
+        Gamepad as Gamepad,
+        ImageProcessor as ImageProcessor,
+        Input as Input,
+        Mouse as Mouse,
+        Shaders as Shaders,
         StreamingTexture as StreamingTexture,
+        Text as Text,
+        Touch as Touch,
+        UnifiedBufferBatch as UnifiedBufferBatch,
         Window as Window,
-        get_assets_loader as get_assets_loader,
-        get_shader_loader as get_shader_loader,
     )
     from plyunit.backends.physics import (
         AABB as AABB,
@@ -80,6 +71,19 @@ if TYPE_CHECKING:
         SegmentShape as SegmentShape,
         StaticBody as StaticBody,
         build_physics_service as build_physics_service,
+    )
+    from plyunit.backends.ports.audio import IAudio as IAudio
+    from plyunit.backends.ports.handler import (
+        FontHandle as FontHandle,
+        ImageHandle as ImageHandle,
+        RenderTextureHandle as RenderTextureHandle,
+        ShaderHandle as ShaderHandle,
+        StreamingTextureHandle as StreamingTextureHandle,
+        Texture2DHandle as Texture2DHandle,
+    )
+    from plyunit.backends.ports.text import (
+        ShapedText as ShapedText,
+        TemplateText as TemplateText,
     )
     from plyunit.core.app import (
         App as App,
@@ -124,14 +128,15 @@ if TYPE_CHECKING:
         RenderPass as RenderPass,
         RenderState as RenderState,
     )
-    from plyunit.services.input import (
-        Gamepad as Gamepad,
-        Input as Input,
-        Mouse as Mouse,
-        Touch as Touch,
+    from plyunit.services.animations import (
+        AnimationClip as AnimationClip,
+        AnimationFrame as AnimationFrame,
+        Animations as Animations,
     )
+    from plyunit.services.audio._types import VoiceId as VoiceId
+    from plyunit.services.audio.spatial import compute_spatial as compute_spatial
     from plyunit.services.scene_manager import SceneManager as SceneManager
-    from plyunit.services.spatial import SpatialIndex as SpatialIndex
+    from plyunit.services.spatial_index import SpatialIndex as SpatialIndex
     from plyunit.services.timers import (
         CoroutineHandle as CoroutineHandle,
         Timer as Timer,
@@ -152,8 +157,14 @@ if TYPE_CHECKING:
 
 
 _LAZY_MODULES = {
-    # Interface
-    "interfaces": "plyunit.backends",
+    # Backend-neutral contracts
+    "ports": "plyunit.backends",
+    "IAudio": "plyunit.backends.ports.audio",
+    "FontHandle": "plyunit.backends.ports.handler",
+    "ImageHandle": "plyunit.backends.ports.handler",
+    "RenderTextureHandle": "plyunit.backends.ports.handler",
+    "StreamingTextureHandle": "plyunit.backends.ports.handler",
+    "Texture2DHandle": "plyunit.backends.ports.handler",
     # Core components
     "Component": "plyunit.core.components",
     "ComponentNotFoundError": "plyunit.core.components",
@@ -189,7 +200,7 @@ _LAZY_MODULES = {
     "Signal": "plyunit.events.signal",
     "on": "plyunit.events.signal",
     "SceneManager": "plyunit.services.scene_manager",
-    "SpatialIndex": "plyunit.services.spatial",
+    "SpatialIndex": "plyunit.services.spatial_index",
     "CoroutineHandle": "plyunit.services.timers",
     "TimerHandle": "plyunit.services.timers",
     "Timer": "plyunit.services.timers",
@@ -198,32 +209,28 @@ _LAZY_MODULES = {
     "TweenAnimation": "plyunit.services.tween",
     "EASINGS": "plyunit.utils.math.easing",
     "get_easing": "plyunit.utils.math.easing",
-    # Input service
-    "Gamepad": "plyunit.services.input",
-    "Input": "plyunit.services.input",
-    "Mouse": "plyunit.services.input",
-    "Touch": "plyunit.services.input",
-    # Audio service
-    "AudioBackend": "plyunit.audio",
-    "Audio": "plyunit.audio",
-    "IAudioBackend": "plyunit.audio",
-    "VoiceId": "plyunit.audio",
-    "compute_spatial": "plyunit.audio",
-    # Assets and text
-    "Animations": "plyunit.assets",
-    "Assets": "plyunit.assets",
-    "AssetsLoader": "plyunit.backends.integrations",
-    "AnimationClip": "plyunit.assets",
-    "AnimationFrame": "plyunit.assets",
-    "TemplateText": "plyunit.assets",
-    "get_assets_loader": "plyunit.backends.integrations",
-    "Shaders": "plyunit.assets",
-    "ShaderHandle": "plyunit.assets",
-    "ShaderLoader": "plyunit.backends.integrations",
-    "ShaderUniform": "plyunit.assets",
-    "get_shader_loader": "plyunit.backends.integrations",
-    "Text": "plyunit.assets",
-    "Font": "plyunit.backends.integrations",
+    # Backend-specific services selected only at the facade boundary
+    "Gamepad": "plyunit.backends.integrations",
+    "Input": "plyunit.backends.integrations",
+    "Mouse": "plyunit.backends.integrations",
+    "Touch": "plyunit.backends.integrations",
+    "Audio": "plyunit.backends.integrations",
+    "VoiceId": "plyunit.services.audio._types",
+    "compute_spatial": "plyunit.services.audio.spatial",
+    # Assets, text, and shared data
+    "Animations": "plyunit.services.animations",
+    "Assets": "plyunit.backends.integrations",
+    "ImageProcessor": "plyunit.backends.integrations",
+    "AnimationClip": "plyunit.services.animations",
+    "AnimationFrame": "plyunit.services.animations",
+    "TemplateText": "plyunit.backends.ports.text",
+    "ShapedText": "plyunit.backends.ports.text",
+    "Shaders": "plyunit.backends.integrations",
+    "ShaderHandle": "plyunit.backends.ports.handler",
+    "ShaderUniform": "plyunit._enums",
+    "TextureFilter": "plyunit._enums",
+    "TextureWrap": "plyunit._enums",
+    "Text": "plyunit.backends.integrations",
     # Rendering
     "BlendMode": "plyunit.rendering",
     "DrawScope": "plyunit.rendering",
@@ -240,8 +247,8 @@ _LAZY_MODULES = {
     "create_app": "plyunit._bootstrap",
     # Integration backend
     "Camera2D": "plyunit.backends.integrations",
-    "Canvas": "plyunit.backends.integrations",
-    "BatchingBackend": "plyunit.backends.integrations",
+    "Canvas2D": "plyunit.backends.integrations",
+    "UnifiedBufferBatch": "plyunit.backends.integrations",
     "StreamingTexture": "plyunit.backends.integrations",
     # Physics backend
     "AABB": "plyunit.backends.physics",
@@ -342,17 +349,14 @@ __all__ = (
     "App",
     "AppConfig",
     "Assets",
-    "AssetsLoader",
     "Audio",
-    "AudioBackend",
     "AudioConfig",
     "AutotileProcessor",
-    "BatchingBackend",
     "BlendMode",
     "BodyType",
     "BoxShape",
     "Camera2D",
-    "Canvas",
+    "Canvas2D",
     "CircleShape",
     "CollisionFilter",
     "CollisionInfo",
@@ -364,12 +368,14 @@ __all__ = (
     "EntityHandle",
     "EntityPool",
     "EventBus",
-    "Font",
+    "FontHandle",
     "Gamepad",
-    "IAudioBackend",
+    "IAudio",
     "ImGui",
     "ImGuiBackend",
     "ImGuiConfig",
+    "ImageHandle",
+    "ImageProcessor",
     "Input",
     "Layer",
     "Mouse",
@@ -389,21 +395,26 @@ __all__ = (
     "RenderContext",
     "RenderPass",
     "RenderState",
+    "RenderTextureHandle",
     "Renderer",
     "SceneManager",
     "SceneUnit",
     "SegmentShape",
     "ServiceUnit",
     "ShaderHandle",
-    "ShaderLoader",
     "ShaderUniform",
     "Shaders",
+    "ShapedText",
     "Signal",
     "SpatialIndex",
     "StaticBody",
     "StreamingTexture",
+    "StreamingTextureHandle",
     "TemplateText",
     "Text",
+    "Texture2DHandle",
+    "TextureFilter",
+    "TextureWrap",
     "TileMapNode",
     "Timer",
     "TimerHandle",
@@ -413,6 +424,7 @@ __all__ = (
     "TransformStore",
     "Tween",
     "TweenAnimation",
+    "UnifiedBufferBatch",
     "Unit",
     "UnitNotSetError",
     "UnitRegistry",
@@ -426,11 +438,10 @@ __all__ = (
     "compute_spatial",
     "configure_logging",
     "create_app",
-    "get_assets_loader",
     "get_easing",
-    "get_shader_loader",
     "init",
     "math",
     "on",
+    "ports",
     "units",
 )

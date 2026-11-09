@@ -4,13 +4,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from plyunit.core.types import PrColor, RectType, ShaderType
+from plyunit.core.types import ColorType, RectType
 from plyunit.rendering.enum import BlendMode
 from plyunit.rendering.render_context import RenderContext
 
 if TYPE_CHECKING:
+    from plyunit.backends.ports.camera2d import ICamera2D
+    from plyunit.backends.ports.handler import RenderTextureHandle, ShaderHandle
+
     from .draw_scope import DrawScope
 
 __all__ = [
@@ -28,7 +31,7 @@ class RenderPass:
 
     Attributes:
         name: Unique pass name used for lookup.
-        target: Optional ``RenderTexture`` the pass draws into.
+        target: Optional opaque render-target handle the pass draws into.
         camera: Optional camera; when None the pass is screen-space.
         clear_color: Optional color for ``clear_background`` before drawing.
         viewport_scissor: Optional (x, y, w, h) rect limiting the draw area.
@@ -41,9 +44,9 @@ class RenderPass:
     """
 
     name: str
-    target: Any | None = None
-    camera: Any | None = None
-    clear_color: PrColor | None = None
+    target: RenderTextureHandle | None = None
+    camera: ICamera2D | None = None
+    clear_color: ColorType | None = None
     viewport_scissor: RectType | None = None
     order: int = 0
     min_layer: int | None = None
@@ -69,7 +72,7 @@ class RenderState:
 
     scissor: RectType | None = None
     blend_mode: BlendMode = BlendMode.ALPHA
-    shader: ShaderType | None = None
+    shader: ShaderHandle | None = None
 
     def state_key(self) -> tuple:
         """Key for grouping/batching at flush time.
@@ -77,7 +80,7 @@ class RenderState:
         Returns a comparable tuple used to decide whether two items can
         be batched together (identical state).
         """
-        shader_id = id(self.shader) if self.shader else 0
+        shader_id = id(self.shader) if self.shader is not None else 0
         return (self.scissor, self.blend_mode, shader_id)
 
     def __eq__(self, other: object) -> bool:
@@ -108,7 +111,7 @@ class RenderStateCache:
         *,
         scissor: RectType | None = None,
         blend_mode: BlendMode | int = BlendMode.ALPHA,
-        shader: ShaderType | None = None,
+        shader: ShaderHandle | None = None,
     ) -> int:
         """Returns the compact id for the given state combination.
 

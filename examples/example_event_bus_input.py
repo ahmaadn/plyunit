@@ -18,7 +18,7 @@ class EventBusInputApp(pu.App):
         pu.EventBus()
         self.event_bus = self.one("@EventBus")
 
-        self.input = pu.Input()
+        self.input = pu.Input(emit_to_bus=True)
         self.mouse = pu.Mouse()
 
         self.input.map("move_up", pr.KeyboardKey.KEY_W, pr.KeyboardKey.KEY_UP)
@@ -42,6 +42,13 @@ class EventBusInputApp(pu.App):
         )
 
         self.text = pu.Text()
+        self.assets.store_texture(
+            "event_bus_player",
+            self.renderer.canvas.create_rect(
+                rect=(0, 0, 28, 28), color=(80, 200, 120, 255)
+            ),
+        )
+        self._player_texture = self.assets.get_asset("event_bus_player")
 
     def _on_jump(self, **kwargs) -> None:
         self._log.append(f"bus jump action={kwargs.get('action')}")
@@ -73,11 +80,11 @@ class EventBusInputApp(pu.App):
         self.scene_manager.render(self.renderer)
 
         x, y = self._pos
-        self.renderer.render_rect(
+        self.renderer.render_sprite(
             z=0,
             layer=pu.Layer.WORLD,
-            rect=(x, y, 28.0, 28.0),
-            color=(80, 200, 120, 255),
+            texture=self._player_texture,
+            pos=(x, y),
         )
         self.text.render(
             z=0,

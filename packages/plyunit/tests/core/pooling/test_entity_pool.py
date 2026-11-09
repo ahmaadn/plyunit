@@ -101,7 +101,7 @@ def test_release_calls_component_reset():
 
 def test_release_removes_from_spatial_index():
     from plyunit.core.units.scene_unit import SceneUnit
-    from plyunit.services.spatial.spatial_index import SpatialIndex
+    from plyunit.services.spatial_index import SpatialIndex
 
     scene = SceneUnit(name="PoolSpatial")
     scene.load()
@@ -128,7 +128,7 @@ def test_release_removes_from_spatial_index():
 def test_release_resets_components_and_spatial():
     from plyunit.core.components.component import Component
     from plyunit.core.units.scene_unit import SceneUnit
-    from plyunit.services.spatial.spatial_index import SpatialIndex
+    from plyunit.services.spatial_index import SpatialIndex
 
     class ResetComp(Component):
         def __init__(self) -> None:

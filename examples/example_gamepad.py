@@ -14,38 +14,37 @@ import plyunit as pu
 
 class GamepadApp(pu.App):
     def on_load(self) -> None:
-        self.input = pu.Input(gamepad=True)
+        self.input = pu.Input()
+        self.gamepad = pu.Gamepad()
         self.touch = pu.Touch()
 
-        self.input.map("jump", pr.KeyboardKey.KEY_SPACE, buttons=["a"])
+        self.input.map("jump", pr.KeyboardKey.KEY_SPACE)
         self.input.map_axis(
             "move_x",
             key_neg=[pr.KeyboardKey.KEY_A, pr.KeyboardKey.KEY_LEFT],
             key_pos=[pr.KeyboardKey.KEY_D, pr.KeyboardKey.KEY_RIGHT],
-            pad_axis="left_x",
-            pad_buttons_neg=["dpad_left"],
-            pad_buttons_pos=["dpad_right"],
         )
         self.input.map_axis(
             "move_y",
             key_neg=[pr.KeyboardKey.KEY_W, pr.KeyboardKey.KEY_UP],
             key_pos=[pr.KeyboardKey.KEY_S, pr.KeyboardKey.KEY_DOWN],
-            pad_axis="left_y",
-            pad_buttons_neg=["dpad_up"],
-            pad_buttons_pos=["dpad_down"],
         )
 
         self._pos = [400.0, 300.0]
         self._flash = 0.0
         self._log: list[str] = []
         self.text = pu.Text()
+        self.assets.store_texture(
+            "gamepad_player",
+            self.renderer.canvas.create_rect(
+                rect=(0, 0, 32, 32), color=(255, 255, 255, 255)
+            ),
+        )
+        self._player_texture = self.assets.get_asset("gamepad_player")
 
-        pu.EventBus()
-        bus = self.one("@EventBus")
-        bus.subscribe("key.jump.pressed", self._on_jump)
+        self._axes = (0.0, 0.0)
 
-    def _on_jump(self, **kwargs) -> None:
-        _ = kwargs
+    def _on_jump(self) -> None:
         self._flash = 0.25
         self._log.append("jump")
         if len(self._log) > 6:
@@ -53,9 +52,19 @@ class GamepadApp(pu.App):
 
     def fixed_update(self, dt: float, step: int) -> None:
         _ = step
-        self.input.update(dt)
-        dx = self.input.get_axis("move_x")
-        dy = self.input.get_axis("move_y")
+        # Combine separate keyboard and gamepad services in application code.
+        stick_x, stick_y = self.gamepad.get_vector()
+        dpad_x = float(self.gamepad.is_down("dpad_right")) - float(
+            self.gamepad.is_down("dpad_left")
+        )
+        dpad_y = float(self.gamepad.is_down("dpad_down")) - float(
+            self.gamepad.is_down("dpad_up")
+        )
+        dx = max((self.input.get_axis("move_x"), stick_x, dpad_x), key=abs)
+        dy = max((self.input.get_axis("move_y"), stick_y, dpad_y), key=abs)
+        self._axes = (dx, dy)
+        if self.input.is_pressed("jump") or self.gamepad.is_pressed("a"):
+            self._on_jump()
         self._pos[0] += dx * 220.0 * dt
         self._pos[1] += dy * 220.0 * dt
         if self._flash > 0.0:
@@ -72,21 +81,19 @@ class GamepadApp(pu.App):
 
         x, y = self._pos
         color = (255, 220, 80, 255) if self._flash > 0 else (90, 180, 255, 255)
-        self.renderer.render_rect(
+        self.renderer.render_sprite(
             z=0,
             layer=pu.Layer.WORLD,
-            rect=(x, y, 32.0, 32.0),
-            color=color,
+            texture=self._player_texture,
+            pos=(x, y),
+            tint=color,
         )
-        pad = self.input.gamepad
-        pad_name = (
-            pad.name_on_device if pad is not None and pad.is_available() else "(none)"
-        )
+        pad = self.gamepad
+        pad_name = pad.name_on_device if pad.is_available() else "(none)"
         lines = [
             f"pad={pad_name}  touch_count={self.touch.count}",
             "move: WASD/arrows or stick/dpad  jump: Space/A",
-            f"axis=({self.input.get_axis('move_x'):.2f},"
-            f" {self.input.get_axis('move_y'):.2f})",
+            f"axis=({self._axes[0]:.2f}, {self._axes[1]:.2f})",
             "log: " + ", ".join(self._log),
         ]
         for i, line in enumerate(lines):

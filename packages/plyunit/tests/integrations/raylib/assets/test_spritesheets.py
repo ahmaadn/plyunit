@@ -1,180 +1,208 @@
+"""Spritesheet loading through raylib Assets and its dedicated Texture2D handles."""
+
+from __future__ import annotations
+
+import importlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
 
-from plyunit.assets.animations import Animations
-from plyunit.assets.assets import AssetPaths, Assets
+from plyunit.backends.integrations.raylib.assets import Assets, ImageProcessor
+from plyunit.core.units.unit_registry import UnitRegistry
+
+
+@pytest.fixture(autouse=True)
+def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> UnitRegistry:
+    registry = UnitRegistry()
+    monkeypatch.setattr(
+        importlib.import_module("plyunit.core.units.unit"), "units", registry
+    )
+    return registry
 
 
 @pytest.fixture
-def mock_assets(tmp_path):
-    assets = MagicMock(spec=Assets)
-    assets._loader = MagicMock()
-    assets._paths = AssetPaths(tmp_path)
-    assets.unit = MagicMock()
-    assets._configs = {}
-
-    # Bind the real methods to the mock object
-    assets.load_spritesheet = Assets.load_spritesheet.__get__(assets)
-    assets.load_from_dict = Assets.load_from_dict.__get__(assets)
-    assets._load_config = Assets._load_config.__get__(assets)
-    assets._read_config = Assets._read_config.__get__(assets)
-    assets._register_regions = Assets._register_regions.__get__(assets)
-    return assets
+def native(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    module = importlib.import_module("plyunit.backends.integrations.raylib.assets")
+    native = MagicMock()
+    native.load_image.side_effect = lambda path: SimpleNamespace(
+        width=64, height=32, format=7, data=b"pixels"
+    )
+    native.is_image_valid.return_value = True
+    native.is_texture_valid.return_value = True
+    native.load_texture_from_image.side_effect = lambda image: SimpleNamespace(
+        id=native.load_texture_from_image.call_count,
+        width=image.width,
+        height=image.height,
+        format=7,
+    )
+    monkeypatch.setattr(module, "pr", native)
+    return native
 
 
 @pytest.fixture
-def mock_animations():
-    return MagicMock(spec=Animations)
+def manager(tmp_path: Path, native: MagicMock) -> Assets:
+    return Assets(tmp_path, image_processor=ImageProcessor())
 
 
-def test_assets_load_spritesheet(mock_assets, mock_animations, tmp_path):
-    mock_assets.one.return_value = mock_animations
-    mock_texture = MagicMock(width=64, height=32)
-
-    config = {
-        "id": "test_sheet",
-        "image_path": "test_image.png",
-        "texture": {"filter": "nearest"},
-        "regions": {
-            "region_1": [0, 0, 32, 32],
-            "region_2": [32, 0, 32, 32]
-        }
-    }
-
-    # Create fake image file
-    image_file = tmp_path / "test_image.png"
-    image_file.touch()
-
-    config_file = tmp_path / "test_sheet.json"
-    with open(config_file, "w") as f:
-        json.dump(config, f)
-
-    # Mock methods
-    mock_assets._loader.load_texture_from_dict.return_value = mock_texture
-
-    # Capture what the real _register_regions caches via _put
-    regions_store = {}
-    def fake_put(t_data):
-        regions_store[t_data.id] = t_data
-    mock_assets._put.side_effect = fake_put
-
-    # Call loader
-    mock_assets.load_spritesheet(str(config_file), asset_id="test_sheet")
-
-    # Verify texture loaded
-    mock_assets._loader.load_texture_from_dict.assert_called_once()
-    mock_assets._store_root.assert_called_once_with("test_sheet", mock_texture)
-
-    # Verify regions registered
-    assert "region_1" in regions_store
-    assert regions_store["region_1"].parent_id == "test_sheet"
-    assert regions_store["region_1"].source_rect == (0.0, 0.0, 32.0, 32.0)
-
-    # Animations are no longer part of the spritesheet config.
-    mock_animations.load_animation.assert_not_called()
+def write_config(tmp_path: Path, data: dict, name: str = "sheet.json") -> Path:
+    path = tmp_path / name
+    path.write_text(json.dumps(data), encoding="utf-8")
+    return path
 
 
-def test_assets_load_spritesheet_missing_image_path(mock_assets, mock_animations, tmp_path):
-    mock_assets.one.return_value = mock_animations
-    config = {"id": "test"}
-    config_file = tmp_path / "test.json"
-    with open(config_file, "w") as f:
-        json.dump(config, f)
+def test_assets_load_spritesheet(
+    manager: Assets, native: MagicMock, tmp_path: Path
+) -> None:
+    (tmp_path / "image.png").touch()
+    config = write_config(
+        tmp_path,
+        {
+            "id": "sheet",
+            "image_path": "image.png",
+            "texture": {"filter": "nearest"},
+            "regions": {"left": [0, 0, 32, 32], "right": [32, 0, 32, 32]},
+        },
+    )
+    manager.load_spritesheet(str(config))
+    assert manager["left"].raw_texture is manager["sheet"].raw_texture
+    assert manager["left"].parent_id == "sheet"
+    assert manager["left"].source_rect == (0.0, 0.0, 32.0, 32.0)
+    assert manager.get_config_path_for("left") == config
+    native.load_texture_from_image.assert_called_once()
+    native.unload_image.assert_called_once()
 
+
+def test_spritesheet_does_not_load_embedded_animations(
+    manager: Assets, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "image.png").touch()
+    config = write_config(
+        tmp_path,
+        {
+            "id": "sheet",
+            "image_path": "image.png",
+            "regions": {},
+            "animations": {"run": {"frames": []}},
+        },
+    )
+    lookup = MagicMock()
+    monkeypatch.setattr(manager, "one_or_none", lookup)
+    manager.load_spritesheet(str(config))
+    lookup.assert_not_called()
+
+
+def test_spritesheet_missing_image_path(manager: Assets, tmp_path: Path) -> None:
+    config = write_config(tmp_path, {"id": "sheet"})
     with pytest.raises(ValueError, match="image_path is required"):
-        mock_assets.load_spritesheet(str(config_file), asset_id="test")
+        manager.load_spritesheet(str(config))
 
 
-def test_assets_load_spritesheet_image_not_found(mock_assets, mock_animations, tmp_path):
-    mock_assets.one.return_value = mock_animations
-    config = {
-        "id": "test",
-        "image_path": "missing.png"
-    }
-    config_file = tmp_path / "test.json"
-    with open(config_file, "w") as f:
-        json.dump(config, f)
-
+def test_spritesheet_missing_image(manager: Assets, tmp_path: Path) -> None:
+    config = write_config(tmp_path, {"id": "sheet", "image_path": "missing.png"})
     with pytest.raises(FileNotFoundError):
-        mock_assets.load_spritesheet(str(config_file), asset_id="test")
+        manager.load_spritesheet(str(config))
 
 
-def test_assets_load_spritesheet_invalid_region(mock_assets, mock_animations, tmp_path):
-    mock_assets.one.return_value = mock_animations
-    config = {
-        "id": "test",
-        "image_path": "test.png",
-        "regions": {
-            "reg1": [0, 0, 32] # Invalid
-        }
-    }
-    image_file = tmp_path / "test.png"
-    image_file.touch()
-
-    config_file = tmp_path / "test.json"
-    with open(config_file, "w") as f:
-        json.dump(config, f)
-
-    with pytest.raises(ValueError, match="must have 4 values for rect"):
-        mock_assets.load_spritesheet(str(config_file), asset_id="test")
-
-
-def test_assets_load_spritesheet_fallback_sheet_id(mock_assets, mock_animations, tmp_path):
-    mock_assets.one.return_value = mock_animations
-    config = {
-        "image_path": "test.png"
-    }
-    image_file = tmp_path / "test.png"
-    image_file.touch()
-
-    config_file = tmp_path / "my_sheet.json"
-    with open(config_file, "w") as f:
-        json.dump(config, f)
-
-    mock_assets.load_spritesheet(str(config_file), asset_id=None)
-
-    mock_assets._store_root.assert_called_once_with("my_sheet", mock_assets._loader.load_texture_from_dict.return_value)
+@pytest.mark.parametrize(
+    "config_id, override, expected",
+    [
+        (None, None, "sheet"),
+        ("configured", None, "configured"),
+        ("configured", "override", "override"),
+    ],
+)
+def test_spritesheet_id_resolution(
+    manager: Assets,
+    tmp_path: Path,
+    config_id: str | None,
+    override: str | None,
+    expected: str,
+) -> None:
+    (tmp_path / "image.png").touch()
+    data = {"image_path": "image.png", "regions": {}}
+    if config_id is not None:
+        data["id"] = config_id
+    config = write_config(tmp_path, data)
+    manager.load_spritesheet(str(config), asset_id=override)
+    assert set(manager.all_assets) == {expected}
+    assert manager[expected].texture_id == manager[expected].parent_id == expected
 
 
-def test_assets_load_spritesheet_only_one_argument(mock_assets, mock_animations, tmp_path):
-    mock_assets.one.return_value = mock_animations
-    config = {
-        "id": "config_sheet_id",
-        "image_path": "test.png"
-    }
-    image_file = tmp_path / "test.png"
-    image_file.touch()
+@pytest.mark.parametrize(
+    "regions",
+    [
+        {"bad": [0, 0, 32]},
+        {"bad": [0, 0, float("nan"), 8]},
+        {"bad": [0, 0, 65, 8]},
+        {"bad": [-1, 0, 8, 8]},
+        {"bad": [0, 0, 0, 8]},
+        {"sheet": [0, 0, 8, 8]},
+        [{"name": "dup", "rect": [0, 0, 8, 8]}, {"name": "dup", "rect": [8, 0, 8, 8]}],
+        [{"name": "missing"}],
+        "invalid-container",
+    ],
+)
+def test_invalid_regions_do_not_replace_or_allocate(
+    manager: Assets, native: MagicMock, tmp_path: Path, regions
+) -> None:
+    (tmp_path / "image.png").touch()
+    config = write_config(
+        tmp_path,
+        {"id": "sheet", "image_path": "image.png", "regions": {"old": [0, 0, 8, 8]}},
+    )
+    manager.load_spritesheet(str(config))
+    old = manager["sheet"]
+    native.load_texture_from_image.reset_mock()
+    native.unload_texture.reset_mock()
+    write_config(
+        tmp_path, {"id": "sheet", "image_path": "image.png", "regions": regions}
+    )
+    with pytest.raises(ValueError):
+        manager.load_spritesheet(str(config))
+    assert manager["sheet"] is old
+    assert "old" in manager.all_assets
+    native.load_texture_from_image.assert_not_called()
+    native.unload_texture.assert_not_called()
 
-    config_file = tmp_path / "my_sheet.json"
-    with open(config_file, "w") as f:
-        json.dump(config, f)
 
-    # Call with only one argument (config_path)
-    mock_assets.load_spritesheet(str(config_file))
+def test_region_name_cannot_overwrite_an_unrelated_owner(
+    manager: Assets, native: MagicMock, tmp_path: Path
+) -> None:
+    (tmp_path / "image.png").touch()
+    manager.load_asset("image.png", asset_id="owned")
+    owner = manager["owned"]
+    config = write_config(
+        tmp_path,
+        {"id": "sheet", "image_path": "image.png", "regions": {"owned": [0, 0, 8, 8]}},
+    )
+    with pytest.raises(ValueError, match="already in use"):
+        manager.load_spritesheet(str(config))
+    assert manager["owned"] is owner
+    assert "sheet" not in manager.all_assets
 
-    mock_assets._store_root.assert_called_once_with("config_sheet_id", mock_assets._loader.load_texture_from_dict.return_value)
 
-
-
-
-
-def test_assets_load_spritesheet_override_id(mock_assets, mock_animations, tmp_path):
-    mock_assets.one.return_value = mock_animations
-    config = {
-        "id": "config_sheet_id",
-        "image_path": "test.png"
-    }
-    image_file = tmp_path / "test.png"
-    image_file.touch()
-
-    config_file = tmp_path / "my_sheet.json"
-    with open(config_file, "w") as f:
-        json.dump(config, f)
-
-    # Call with override parameter asset_id
-    mock_assets.load_spritesheet(str(config_file), asset_id="override_sheet_id")
-
-    mock_assets._store_root.assert_called_once_with("override_sheet_id", mock_assets._loader.load_texture_from_dict.return_value)
+def test_reloading_sheet_removes_old_frames(
+    manager: Assets, native: MagicMock, tmp_path: Path
+) -> None:
+    (tmp_path / "image.png").touch()
+    config = write_config(
+        tmp_path,
+        {"id": "sheet", "image_path": "image.png", "regions": {"old": [0, 0, 8, 8]}},
+    )
+    manager.load_spritesheet(str(config))
+    old_raw = manager["sheet"].raw_texture
+    write_config(
+        tmp_path,
+        {
+            "id": "sheet",
+            "image_path": "image.png",
+            "regions": [{"name": "new", "rect": [8, 0, 8, 8]}],
+        },
+    )
+    manager.load_spritesheet(str(config))
+    assert set(manager.all_assets) == {"sheet", "new"}
+    assert manager["new"].raw_texture is manager["sheet"].raw_texture
+    native.unload_texture.assert_called_once_with(old_raw)

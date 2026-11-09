@@ -1,113 +1,56 @@
-"""Shared engine types (Texture, RectType, ColorType, ...).
-
-Contains primitive type aliases and lightweight protocols used by the core
-engine components without depending on the renderer backend.
-"""
+"""Backend-neutral geometry, identifiers, and rendering values."""
 
 import array
 from collections.abc import Sequence
-from typing import Any, Protocol, runtime_checkable
+from dataclasses import dataclass
+from typing import Literal
 
 type ColorType = tuple[int, int, int, int]
-"""RGBA color representation (red, green, blue, alpha)."""
+"""RGBA color components from zero to 255."""
 
 type Vec2Type = tuple[float, float]
-"""2D vector or point (x, y)."""
+"""Two-dimensional coordinates or vector components."""
 
 type RectType = tuple[float, float, float, float]
-"""Rectangle geometry defined by (x, y, width, height)."""
+"""Rectangle represented by ``(x, y, width, height)``."""
 
 type PosType = Vec2Type
-"""2D spatial position (x, y)."""
+"""Two-dimensional position."""
 
 type SizeType = Vec2Type
-"""2D dimensions (width, height)."""
-
-type SourceRectType = RectType
-"""Source rectangle (x, y, width, height) defining a sub-region of a texture."""
+"""Width and height."""
 
 type PosFlatType = array.array[float] | Sequence[float]
-"""Flat sequence of positions [x0, y0, x1, y1, ...] optimized for batch submissions."""
+"""Flat position components ``[x0, y0, x1, y1, ...]``."""
 
 type PosNestedType = Sequence[PosType]
-"""Nested sequence of positions [(x0, y0), (x1, y1), ...]."""
+"""Sequence of two-dimensional positions."""
+
+type TextureID = str
+"""Logical asset identity, independent of a backend's GPU resource name."""
+
+type UniformValue = float | int | Sequence[float] | Sequence[int]
+"""Numeric scalar or vector supplied to a shader uniform."""
 
 
-@runtime_checkable
-class PrColor(Protocol):
-    """4-component R8G8B8A8 (32-bit) color."""
+@dataclass(frozen=True, slots=True)
+class NPatchInfo:
+    """Portable layout for resizable nine-slice or three-slice textures.
 
-    r: int
-    g: int
-    b: int
-    a: int
+    Attributes:
+        source: Source rectangle on the whole texture in pixels.
+        left: Fixed left border width.
+        top: Fixed top border height.
+        right: Fixed right border width.
+        bottom: Fixed bottom border height.
+        layout: Nine-slice or vertical/horizontal three-slice layout.
+    """
 
-
-@runtime_checkable
-class Vector2Type(Protocol):
-    """2D vector components."""
-
-    x: float
-    y: float
-
-
-@runtime_checkable
-class RectangleType(Protocol):
-    """Rectangle geometry components."""
-
-    x: float
-    y: float
-    width: float
-    height: float
-
-
-@runtime_checkable
-class Texture(Protocol):
-    """GPU texture object properties."""
-
-    id: int
-    width: int
-    height: int
-    mipmaps: int
-    format: int
-
-
-@runtime_checkable
-class RenderTexture(Protocol):
-    """RenderTexture (FBO) for render-to-texture operations."""
-
-    id: int
-    texture: Texture
-    depth: Texture
-
-
-@runtime_checkable
-class ShaderType(Protocol):
-    """GPU shader program."""
-
-    id: int
-    locs: Sequence[int]  # Array of shader uniform locations
-
-
-@runtime_checkable
-class NPatchInfoType(Protocol):
-    """NPatch (nine-patch) layout configuration for scalable textures."""
-
-    source: RectangleType
-    left: int
-    top: int
-    right: int
-    bottom: int
-    layout: int
-
-
-@runtime_checkable
-class FontType(Protocol):
-    """Font object containing a glyph atlas texture and rendering metrics."""
-
-    baseSize: int
-    glyphCount: int
-    glyphPadding: int
-    texture: Texture
-    recs: Sequence[RectangleType]
-    glyphs: Sequence[Any]  # Replace Any with a GlyphInfo protocol if available
+    source: RectType
+    left: int = 0
+    top: int = 0
+    right: int = 0
+    bottom: int = 0
+    layout: Literal["nine_patch", "three_patch_vertical", "three_patch_horizontal"] = (
+        "nine_patch"
+    )

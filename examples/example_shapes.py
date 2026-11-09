@@ -1,18 +1,13 @@
-"""Example: Advanced Shapes Rendering
+"""Bake advanced canvas shapes and render them as atlas-backed sprites.
 
-Demonstrasi penggunaan semua fitur render shape lanjutan pada Canvas di Plyunit:
-- Rectangle (Rotasi, gradien, specific rounded corners, outline + fill)
-- Circle (Sector angles, rotasi, outline + fill, gradient)
-- Triangle (3-point gradient, outline, rotasi, pivot/origin)
-- Line (Thick, bezier, rotasi)
-- Polygon (Rotasi, thickness)
+Demonstrates rotated rectangles, gradients, rounded corners, circle sectors,
+triangles, polygons, and thick or Bezier lines.
 """
 
 import math
 
-import pyray as pr
-
 import plyunit as pu
+from plyunit.backends.ports.handler import Texture2DHandle
 
 
 class ShapeShowcase(pu.NodeUnit):
@@ -20,7 +15,7 @@ class ShapeShowcase(pu.NodeUnit):
         super().__init__(name="ShapeShowcase")
         self.time = 0.0
         self._text: pu.Text | None = None
-        self._sprites: dict[str, object] = {}
+        self._sprites: dict[str, Texture2DHandle] = {}
 
     def update(self, dt: float) -> None:
         self.time += dt
@@ -28,8 +23,8 @@ class ShapeShowcase(pu.NodeUnit):
     def on_ready(self) -> None:
         """Bake the showcase shapes once; only sprite transforms animate.
 
-        ``on_ready`` (bukan ``on_load``) adalah hook NodeUnit — dipanggil
-        saat node ter-attach ke scene tree, saat GPU context sudah aktif.
+        ``on_ready`` runs when the node enters the scene tree, after the
+        graphics context has been initialized.
         """
         canvas = self.one("@Renderer").canvas
         assets = self.one("@Assets")
@@ -96,9 +91,8 @@ class ShapeShowcase(pu.NodeUnit):
             f"showcase_{key}": texture for key, texture in textures.items()
         })
         assets.build_texture_atlas([f"showcase_{key}" for key in textures])
-        self._sprites = {
-            key: assets.get_texture_data(f"showcase_{key}") for key in textures
-        }
+        # Baking already returns handles; packing replaces them with atlas regions.
+        self._sprites = {key: assets.get_asset(f"showcase_{key}") for key in textures}
         self._text = pu.Text()
 
     def _render_sprite(
@@ -110,10 +104,10 @@ class ShapeShowcase(pu.NodeUnit):
         origin: tuple[float, float] = (0.0, 0.0),
         rotation: float = 0.0,
     ) -> None:
-        data = self._sprites[key]
+        texture = self._sprites[key]
         renderer.render_sprite(
-            texture=data.texture,
-            source=data.source_rect,
+            texture=texture,
+            source=texture.source_rect,
             pos=pos,
             origin=origin,
             rotation=rotation,
@@ -121,7 +115,7 @@ class ShapeShowcase(pu.NodeUnit):
             layer=pu.Layer.ENTITIES,
         )
 
-    def render_submit(self, renderer) -> None:
+    def render_submit(self, renderer, context=None) -> None:
         if self._text is None:
             return
 
@@ -159,7 +153,7 @@ class ShapeShowcase(pu.NodeUnit):
         )
         self._render_sprite(renderer, "bezier", (398.0, 458.0))
 
-        label_color = pr.LIGHTGRAY
+        label_color = (200, 200, 200, 255)
         for text, pos in (
             ("Plyunit Baked Canvas Shapes", (20, 20)),
             ("1. Advanced Rectangle", (40, 70)),
@@ -200,7 +194,7 @@ class ShapesApp(pu.App):
         _ = dt
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((245, 245, 245, 255))
+        self.window.clear_background((30, 30, 40, 255))
         self.scene_manager.render(self.renderer)
         self.renderer.flush_all()
         self.window.end_drawing()
@@ -213,7 +207,6 @@ def main():
             title="Shapes Rendering Showcase",
             window_width=640,
             window_height=560,
-            background_color=pr.Color(30, 30, 40, 255),
         ),
     )
     app.run()

@@ -133,20 +133,24 @@ class ChunkTile:
             self.unload_chunk(key)
 
     def update(self, visible_keys: set[ChunkKey]) -> None:
-        """Syncs active chunks with the set of visible chunks.
+        """Sync active chunks with visibility and the residency budget.
 
-        Loads chunks in the visible+margin area, unloads chunks outside
-        the evict zone, and pins/evicts according to capacity. For small
-        maps, every chunk is pinned at once.
+        Visible chunks take priority over the preload margin. Keep resident
+        visible chunks when the viewport exceeds the budget so a stationary
+        view does not repeatedly load and evict the same chunks. Small maps
+        are pinned in full regardless of the per-update load limit.
 
         Args:
-            visible_keys: Set of chunk keys currently visible in the viewport.
+            visible_keys: Chunk keys currently visible in the viewport.
         """
         config = self._tilemap.config
         if config is None:
             return
 
         total_chunks = len(config.chunks)
+        for key in list(self._loaded):
+            if key not in config.chunks:
+                self.unload_chunk(key)
         pin_all = total_chunks > 0 and total_chunks <= self._max_loaded
 
         if pin_all:
@@ -158,25 +162,39 @@ class ChunkTile:
                     self.load_chunk(key)
             return
 
-        keep = self._keys_around(visible_keys, self._margin)
+        visible = visible_keys & config.chunks.keys()
+        keep = self._keys_around(visible_keys, self._margin) & config.chunks.keys()
         evict_zone = self._keys_around(visible_keys, self._margin + 1)
 
+        for key in list(self._loaded):
+            if key not in evict_zone:
+                self.unload_chunk(key)
+            elif key in visible:
+                self._loaded.move_to_end(key)
+
+        # Resident visible chunks take priority over new visible chunks, then
+        # margin chunks. Selecting a bounded target prevents load/evict churn
+        # when the viewport itself exceeds the residency budget.
+        def priority(key: ChunkKey) -> tuple[bool, ChunkKey]:
+            """Prefer resident chunks, then use a stable order for new loads."""
+            return key not in self._loaded, key
+
+        targets = sorted(visible, key=priority) + sorted(keep - visible, key=priority)
+        targets = targets[: self._max_loaded]
+        target_keys = set(targets)
+
         loads = 0
-        for key in keep:
-            if key not in config.chunks or key in self._loaded:
+        for key in targets:
+            if key in self._loaded:
                 continue
             if self._max_loads_per_update > 0 and loads >= self._max_loads_per_update:
                 break
             self.load_chunk(key)
             loads += 1
 
-        for key in list(self._loaded):
-            if key not in evict_zone:
-                self.unload_chunk(key)
-
         while len(self._loaded) > self._max_loaded:
-            oldest, _ = self._loaded.popitem(last=False)
-            self._tilemap._unload_chunk(oldest)
+            oldest = next(key for key in self._loaded if key not in target_keys)
+            self.unload_chunk(oldest)
 
     def _keys_around(self, visible_keys: set[ChunkKey], margin: int) -> set[ChunkKey]:
         """Builds the set of chunk keys around visible_keys including the margin.
@@ -192,8 +210,8 @@ class ChunkTile:
             return set(visible_keys)
         result: set[ChunkKey] = set(visible_keys)
         for key in visible_keys:
-            cx_s, cy_s = key.split(",", 1)
             try:
+                cx_s, cy_s = key.split(",", 1)
                 cx = int(cx_s)
                 cy = int(cy_s)
             except ValueError:

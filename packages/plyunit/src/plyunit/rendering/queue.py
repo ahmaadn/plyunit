@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from .enum import PrimitiveKind, RenderKind
 
 if TYPE_CHECKING:
-    from plyunit.backends.interfaces import ICanvas2D
+    from plyunit.backends.ports.renderer import ICanvas2D
 
 
 @dataclass(slots=True)
@@ -26,7 +26,7 @@ class PrimitiveItem:
     """
 
     kind: PrimitiveKind
-    payload: Any
+    payload: dict[str, Any]
 
 
 @dataclass(slots=True)
@@ -57,7 +57,7 @@ class RenderItem:
     screen_space: bool
 
     @property
-    def batch_key(self) -> tuple[Any, ...]:
+    def batch_key(self) -> tuple[str, int, int, RenderKind, PrimitiveKind | None]:
         """Grouping key used to batch compatible render items together."""
         material = None
         if isinstance(self.payload, PrimitiveItem):

@@ -1,8 +1,9 @@
 # Typed renderer queue
 
-Normal game content enters `Renderer` during `render_submit` and is flushed by
-`Renderer.flush_all`. Sprites use a SoA `FrameBuffer`; primitives, shaped text,
-and custom callbacks use the typed render queue.
+`Renderer` accepts submissions from node/component
+`render_submit(renderer, context)` hooks or from `App.update(dt)`. Sprites and
+shaped glyph quads use the SoA `FrameBuffer`; dynamic Canvas geometry and
+custom callbacks use the typed render queue. `Renderer.flush_all` draws both.
 
 ## Lifecycle
 
@@ -12,34 +13,52 @@ App.update(dt)  (user hook — the render pipeline)
   window.begin_drawing()
   SceneManager.render(renderer)
     SceneUnit.dispatch_render(renderer)
-      NodeUnit.render_submit(renderer) / component render_submit
-      renderer.render_*(...)
+      NodeUnit.render_submit(renderer, context) / component render_submit
+      renderer.render_sprite / render_batch / render_sprites / render_shaped_text
+      renderer.render_custom
   ...app-level submissions...
   renderer.flush_all(camera=...)
   window.end_drawing()
 ```
 
 Submit every render frame. Do not submit from fixed-update hooks.
+`SceneUnit` has no `render_submit` hook; attach renderer nodes to `scene.root`.
+
+Use `ICanvas2D` and resource handle types from `plyunit.backends.ports` for
+neutral type annotations. `Canvas2D()` returns the module-backed canvas;
+it is a factory, not a canvas class. Raw textures and native GPU IDs are not
+renderer inputs.
 
 ## One sprite
 
 ```python
-def render_submit(self, renderer: pu.Renderer) -> None:
-    world = self.world_transform_lerp(1.0)
+def render_submit(self, renderer: pu.Renderer, context: pu.RenderContext | None = None) -> None:
+    world = context.render_transform if context is not None else None
+    if world is None:
+        world = self.world_transform_lerp(1.0)
     renderer.render_sprite(
         texture=self.texture,
         pos=world.position,
-        layer=pu.Layer.ENTITIES,
-        z=0,
+        layer=context.layer if context is not None else self.layer,
+        z=context.z if context is not None else self.z_index,
         scale=1.0,
         rotation=world.rotation,
         origin=(8.0, 8.0),
         source=None,
         tint=(255, 255, 255, 255),
+        pass_name=context.pass_name if context is not None else None,
+        state_id=context.state_id if context is not None else None,
+        y_sort=context.y_sort if context is not None else self.y_sort_enabled,
+        y_sort_origin=context.y_sort_origin if context is not None else world.position[1],
+        screen_space=context.screen_space if context is not None else None,
     )
 ```
 
-Each call appends one sprite to the FrameBuffer.
+Each call appends one sprite to the FrameBuffer. Passing the resolved context
+preserves inherited pass, scissor/blend/shader state, screen space, and y-sort.
+`texture` is a `Texture2DHandle`, including a spritesheet/atlas region.
+`source=None` uses its `source_rect`; its logical `texture_id` is a string,
+while `IUnifiedBufferBatch.texture_id(handle)` resolves the GPU integer.
 
 ## Many sprites
 
@@ -65,14 +84,14 @@ For a NumPy hot path:
 ```python
 renderer.render_batch(
     texture=texture,
-    positions=pos_xy,  # required by the current signature
-    pos_xy=pos_xy,     # contiguous numpy.float32 array with shape (n, 2)
+    pos_xy=pos_xy,  # contiguous numpy.float32 array with shape (n, 2)
     layer=pu.Layer.EFFECTS,
 )
 ```
 
-`pos_xy` avoids a Python loop and avoids normalization allocation when already
-contiguous `float32`. The renderer still copies positions into its FrameBuffer;
+`positions` can be omitted when `pos_xy` is supplied. `pos_xy` avoids a Python
+loop and avoids normalization allocation when already contiguous `float32`.
+The renderer still copies positions into its FrameBuffer;
 this is a vectorized bulk append, not zero-copy simulation-to-GPU storage.
 
 ## Many sprites, many textures
@@ -84,12 +103,16 @@ replaces a loop of `render_sprite` calls when the batch comes from
 `canvas.create_rects`/`create_circles`/... :
 
 ```python
+# Create once in on_load/on_ready, after the graphics context exists.
 rects = canvas.create_rects(
     rects=[(0, 0, 32, 32), (0, 0, 16, 48)],
     colors=[(255, 0, 0, 255), (0, 255, 0, 255)],
 )
+assets.store_textures({"red_rect": rects[0], "green_rect": rects[1]})
+
+# Submit each render frame; resolve handles again if assets are repacked.
 renderer.render_sprites(
-    textures=rects,
+    textures=[assets["red_rect"], assets["green_rect"]],
     positions=[(10.0, 10.0), (60.0, 40.0)],
     layer=pu.Layer.ENTITIES,
     z=0,
@@ -102,24 +125,32 @@ are optional; a `pos_xy` contiguous `float32` array is accepted instead of
 
 ## Primitives as textures
 
-Immediate primitives (`render_rect`, `render_circle`, ...) are convenient for
-debug overlays but can become a bottleneck when drawn every frame. Bake them
-once into a `Texture2D` with the Canvas creation API, store it in `Assets`,
-and render it through the sprite path:
+The former `Renderer` primitive submit methods are removed, including their
+plural variants. For reusable geometry, bake a shape once with the Canvas
+creation API, transfer its standalone texture to `Assets`, and draw it through
+the sprite path. Do not bake shapes per frame.
 
 ```python
-paddle = canvas.create_rect(rect=(0, 0, 32, 8), color=(255, 255, 255, 255))
-self.one("@Assets").store_texture("paddle", paddle)
+# App.on_load, after bootstrap.
+self.assets.store_texture(
+    "paddle",
+    self.canvas.create_rect(rect=(0, 0, 32, 8), color=(255, 255, 255, 255)),
+)
 
-# Or in bulk:
-rects = canvas.create_rects(rects=[...], colors=[...])
-self.one("@Assets").store_textures({"rect_1": rects[0], "rect_2": rects[1]})
+# App.update, after reset_frame and before flush_all.
+self.renderer.render_sprite(texture=self.assets["paddle"], pos=(80.0, 120.0))
 ```
 
-Each primitive is drawn into a transparent render texture sized to its
-bounding box (offsets normalized to the top-left corner) and returned as a
-standalone `Texture2D`, so stored textures stay valid for reuse and are
-packable by `Assets.build_texture_atlas` like any other root asset.
+Each shape is baked into a transparent offscreen target sized to its bounds,
+then copied into a standalone `Texture2DHandle`. `Assets.store_texture`
+adopts this standalone resource and assigns its logical asset ID. Resolve
+that ID again after storage or atlas packing; do not keep stale pre-pack handles.
+Baked shape textures can be packed by `Assets.build_texture_atlas`.
+
+A render target's `texture`, a font's atlas, and a streaming texture's
+attachment are **borrowed**, unlike these standalone baked textures. `Assets`
+cannot adopt or free them. Keep their owner alive until queued draws finish,
+and release only the owner before the graphics context closes.
 
 | Primitive | Single | Batch |
 | --- | --- | --- |
@@ -129,52 +160,37 @@ packable by `Assets.build_texture_atlas` like any other root asset.
 | Triangle | `canvas.create_triangle(...)` | `canvas.create_triangles(...)` |
 | Polygon | `canvas.create_poly(...)` | `canvas.create_polys(...)` |
 
-## Primitives
+## Dynamic and debug geometry
 
-> **Deprecated.** The immediate primitive submits (`render_rect`,
-> `render_circle`, `render_line`, `render_triangle`, and the plural batch
-> variants) are a per-frame performance bottleneck. Bake the shape once with
-> `canvas.create_rect`/`create_circle`/... , store it via
-> `Assets.store_texture`, and render it through `render_sprite` /
-> `render_sprites` — see [Primitives as textures](#primitives-as-textures).
+For geometry whose shape changes every frame, queue a Canvas callback.
+The callback runs during flush in the selected pass/layer/state. The rectangle
+Canvas method is `draw_rectangle`, not `draw_rect`:
 
 ```python
-renderer.render_rect(  # DeprecationWarning
-    rect=(10, 10, 40, 20),
-    color=(255, 0, 0, 255),
-    layer=pu.Layer.WORLD,
+renderer.render_custom(
+    draw_func=lambda canvas: canvas.draw_rectangle(
+        rect=(20.0, 20.0, 200.0 * hp_ratio, 16.0),
+        color=(220, 50, 50, 255),
+    ),
+    layer=pu.Layer.UI,
 )
-renderer.render_circle(  # DeprecationWarning
-    center=(50, 50),
-    radius=8.0,
-    color=(0, 255, 0, 255),
-)
-renderer.render_line(  # DeprecationWarning
-    start=(0, 0),
-    end=(100, 100),
-    color=(0, 0, 255, 255),
-)
-renderer.render_triangle(...)  # DeprecationWarning
-
-# Vectorized primitive APIs (also deprecated)
-renderer.render_rects(...)
-renderer.render_circles(...)
-renderer.render_lines(...)
-renderer.render_triangles(...)
 ```
 
-There are no separate `render_ui_*` or `render_debug_*` families. Use ordinary
-typed methods with `layer=Layer.UI` / `Layer.DEBUG`, or set `pass_name`.
+There are no `render_ui_*` or `render_debug_*` families. Use sprite/text
+submissions or `render_custom` with `Layer.UI` / `Layer.DEBUG`, or select a
+render pass explicitly.
 
 ## Text
 
 Use `Text.push(...)` for the normal shaped-text path, or
-`Renderer.render_shaped_text(...)` when text has already been shaped. The old
-`Renderer.render_text(...)` method is deprecated.
+`Renderer.render_shaped_text(...)` when text has already been shaped. Glyph
+quads enter the same native sprite batch and carry a borrowed font-atlas
+handle; the font must stay loaded until flush. Use `Text.draw` only for
+intentional immediate Canvas drawing inside a drawing context.
 
 ```python
 text = pu.Text()  # construct once while the App registry is active
-text.push("Score: 10", pos=(20, 20), color=(255, 255, 255, 255))
+text.push("Score: 10", pos=(20, 20), color=(255, 255, 255, 255), layer=pu.Layer.UI)
 ```
 
 ## Custom drawing
@@ -191,8 +207,10 @@ renderer.render_custom(
 )
 ```
 
-Use custom callbacks only when typed methods cannot express the operation;
-callbacks can interrupt sprite runs. See [../immediate-rendering.md](../immediate-rendering.md).
+Use custom callbacks for dynamic/debug geometry and operations the sprite
+path cannot express. Draw through the supplied `ICanvas2D`; do not submit
+renderer work inside a callback (submissions during flush are rejected).
+Callbacks can interrupt sprite runs. See [../immediate-rendering.md](../immediate-rendering.md).
 
 ## Render state
 

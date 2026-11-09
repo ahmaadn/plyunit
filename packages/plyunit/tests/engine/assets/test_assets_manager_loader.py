@@ -1,456 +1,221 @@
+"""Loading, path containment, and configuration regression tests for Assets."""
+
 from __future__ import annotations
 
-import importlib
+import json
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
-import plyunit as pu
-import plyunit.assets.assets as assets_module
-from plyunit.assets.types import TextureData, TextureProperty
-
-unit_module = importlib.import_module("plyunit.core.units.unit")
-
-
-@pytest.fixture()
-def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> pu.UnitRegistry:
-    registry = pu.UnitRegistry()
-    monkeypatch.setattr(unit_module, "units", registry)
-    monkeypatch.setattr(pu, "units", registry, raising=False)
-    return registry
+from asset_fakes import FakeGPU, FakeImages
+from plyunit.backends.integrations.raylib.assets import Assets
+from plyunit.backends.ports.assets import IAssets, IImageProcessor
+from plyunit.backends.ports.handler import Texture2DHandle
+from plyunit.utils.paths import resolve_config_resource, resolve_inside
 
 
-class DummyLoader:
-    def __init__(self) -> None:
-        self.texture_calls: list[Path] = []
-        self.dict_calls: list[tuple[object, Path | None]] = []
-        self.default = TextureProperty(
-            filter="nearest",
-            wrap="clamp",
-            mipmap=False,
-            srgb=True,
-            premultiply_alpha=False,
-            color_key=(0, 0, 0, 255),
-        )
-
-    def load_texture(self, path: Path, **_kwargs):
-        self.texture_calls.append(path)
-
-        class FakeTexture:
-            width = 100
-            height = 100
-
-            def __init__(self, name):
-                self.name = name
-
-        return FakeTexture(f"texture:{path.name}")
-
-    def load_texture_from_dict(
-        self, data, *, image_path: Path | None = None
-    ):
-        self.dict_calls.append((data, image_path))
-
-        class FakeTexture:
-            width = 100
-            height = 100
-
-            def __init__(self, name):
-                self.name = name
-
-        # pyrefly: ignore [missing-attribute]
-        return FakeTexture(f"dict:{image_path.name}")
-
-    def unload_texture(self, texture):
-        self.texture_calls.append(Path(f"unload:{texture}"))
+def write_config(path: Path, data: dict) -> None:
+    path.write_text(json.dumps(data), encoding="utf-8")
 
 
-def test_loader_load_texture_and_apply_modes(monkeypatch: pytest.MonkeyPatch) -> None:
-    calls: dict[str, object] = {}
-
-    class FakeImage:
-        width = 8
-        height = 4
-
-    class FakeColor:
-        def __init__(self, r: int, g: int, b: int, a: int) -> None:
-            self.r = int(r)
-            self.g = int(g)
-            self.b = int(b)
-            self.a = int(a)
-
-    def load_image(path: str | Path) -> FakeImage:
-        calls["load_image"] = str(path)
-        return FakeImage()
-
-    def image_color_replace(image: FakeImage, _from: FakeColor, _to: FakeColor) -> None:
-        _ = image, _from, _to
-        calls["color_replace"] = True
-
-    def image_alpha_premultiply(image: FakeImage) -> None:
-        _ = image
-        calls["alpha"] = True
-
-    def load_texture_from_image(image: FakeImage) -> str:
-        _ = image
-        calls["load_texture"] = True
-        return "tex"
-
-    def unload_image(image: FakeImage) -> None:
-        _ = image
-        calls["unload"] = True
-
-    def gen_texture_mipmaps(texture: str) -> None:
-        _ = texture
-        calls["mipmap"] = True
-
-    def set_texture_filter(texture: str, value: str) -> None:
-        _ = texture
-        if value not in {"nearest", "linear"}:
-            raise ValueError(f"Mode filter tidak dikenal {value!r}")
-        calls["filter"] = {"nearest": 11, "linear": 12}.get(value, value)
-
-    def set_texture_wrap(texture: str, value: str) -> None:
-        _ = texture
-        if value not in {"clamp", "mirror", "repeat"}:
-            raise ValueError(f"Mode wrap tidak dikenal '{value}'")
-        calls["wrap"] = {"clamp": 22, "mirror": 23, "repeat": 24}.get(value, value)
-
-    import plyunit.backends.integrations.raylib.assets.assets_loader as loader_module
-    from plyunit.backends.integrations.raylib.assets import AssetsLoader  # noqa: PLC0415
-
-    monkeypatch.setattr(loader_module, "load_image", load_image)
-    monkeypatch.setattr(loader_module.pr, "image_color_replace", image_color_replace)
-    monkeypatch.setattr(
-        loader_module.pr, "image_alpha_premultiply", image_alpha_premultiply
-    )
-    monkeypatch.setattr(loader_module.pr, "Color", FakeColor)
-    monkeypatch.setattr(
-        loader_module, "load_texture_from_image", load_texture_from_image
-    )
-    monkeypatch.setattr(loader_module, "unload_image", unload_image)
-    monkeypatch.setattr(loader_module, "gen_texture_mipmaps", gen_texture_mipmaps)
-    monkeypatch.setattr(loader_module, "set_texture_filter", set_texture_filter)
-    monkeypatch.setattr(loader_module, "set_texture_wrap", set_texture_wrap)
-
-    loader = AssetsLoader()
-    texture = loader.load_texture(
-        Path("hero.png"),
-        alpha_premultiply=True,
-        filter_mode="nearest",
-        wrap_mode="clamp",
-        mipmap=True,
-    )
-
-    assert texture == "tex"
-    assert calls["color_replace"] is True
-    assert calls["alpha"] is True
-    assert calls["filter"] == 11
-    assert calls["wrap"] == 22
-    assert calls["mipmap"] is True
-
-    # Validation paths use the real module functions
-    real_set_filter = importlib.import_module(
-        "plyunit.backends.integrations.raylib.assets.assets_loader"
-    )
-    # Call through unpatched names by re-binding FILTER maps and using original
-    # implementations that live on the module (we overwrote them above).
-    # Restore originals for the validation assertions:
-    importlib.reload(loader_module)
-
-    with pytest.raises(ValueError, match="Mode filter tidak dikenal"):
-        loader_module.set_texture_filter("tex", "unknown")
-
-    with pytest.raises(ValueError, match="Mode wrap tidak dikenal"):
-        loader_module.set_texture_wrap("tex", "unknown")
-
-    _ = real_set_filter
+def test_asset_manager_conforms_to_ports(
+    manager: Assets, images: FakeImages, gpu: FakeGPU
+) -> None:
+    assert isinstance(manager, IAssets)
+    assert isinstance(images, IImageProcessor)
+    manager.store_texture("asset", gpu.texture("asset", 8, 8))
+    assert isinstance(manager["asset"], Texture2DHandle)
+    view = manager.all_assets
+    with pytest.raises(TypeError):
+        view["other"] = manager["asset"]
+    manager.unload_asset("asset")
+    assert view == {}
 
 
 def test_asset_manager_load_asset_from_json_and_image(
-    isolated_registry: pu.UnitRegistry,
-    tmp_path: Path,
+    manager: Assets, images: FakeImages, tmp_path: Path
 ) -> None:
-    _ = isolated_registry
-
-    loader = DummyLoader()
-    # pyrefly: ignore [bad-argument-type]
-    manager = assets_module.Assets(asset_base_path=tmp_path, loader=loader)
-
-    image_path = tmp_path / "hero.png"
-    image_path.write_text("x", encoding="utf-8")
-
-    config_path = tmp_path / "hero.json"
-    config_path.write_text(
-        '{"id": "hero", "image_path": "hero.png", "texture": {"wrap": "clamp"}}',
-        encoding="utf-8",
+    image = tmp_path / "hero.png"
+    image.touch()
+    config = tmp_path / "hero.json"
+    write_config(
+        config, {"id": "hero", "image_path": "hero.png", "texture": {"wrap": "clamp"}}
     )
-
     manager.load_asset("hero.json")
-
-    assert loader.dict_calls
-    # pyrefly: ignore [missing-attribute]
-    assert manager.get_asset("hero").name == "dict:hero.png"
-
-    standalone_path = tmp_path / "coin.png"
-    standalone_path.write_text("x", encoding="utf-8")
-
+    assert images.loaded == [image]
+    assert manager["hero"].texture_id == "hero"
+    assert manager.get_config_path_for("hero") == config
+    standalone = tmp_path / "coin.png"
+    standalone.touch()
     manager.load_asset("coin.png")
-    assert loader.texture_calls == [standalone_path]
-    # pyrefly: ignore [missing-attribute]
-    assert manager["coin"].name == "texture:coin.png"
+    assert images.loaded == [image, standalone]
+    assert manager["coin"].source_rect == (0.0, 0.0, 100.0, 100.0)
+    assert manager.get_config_path_for("coin") is None
 
 
 def test_asset_manager_load_spritesheet(
-    isolated_registry: pu.UnitRegistry,
-    tmp_path: Path,
+    manager: Assets, images: FakeImages, tmp_path: Path
 ) -> None:
-    _ = isolated_registry
-
-    loader = DummyLoader()
-    # pyrefly: ignore [bad-argument-type]
-    manager = assets_module.Assets(asset_base_path=tmp_path, loader=loader)
-
-    config_path = tmp_path / "sheet.json"
-    config_path.write_text(
-        '{"id": "my_sheet", "type": "spritesheet", "image_path": "sheet.png", "regions": {"tile1": {"rect": [0,0,16,16]}}}',
-        encoding="utf-8",
+    (tmp_path / "sheet.png").touch()
+    config = tmp_path / "sheet.json"
+    write_config(
+        config,
+        {
+            "id": "sheet",
+            "type": "spritesheet",
+            "image_path": "sheet.png",
+            "regions": {"tile": [0, 0, 16, 16]},
+        },
     )
-
-    image_path = tmp_path / "sheet.png"
-    image_path.write_text("x", encoding="utf-8")
-
     manager.load_spritesheet("sheet.json")
+    assert manager["tile"].raw_texture is manager["sheet"].raw_texture
+    assert manager["tile"].parent_id == "sheet"
+    assert manager.get_config_path_for("tile") == config
 
-    assert "my_sheet" in manager._textures
-    assert manager.get_texture_data("tile1").parent_id == "my_sheet"
 
-
-def test_asset_manager_resolves_image_next_to_nested_sidecar(
-    isolated_registry: pu.UnitRegistry,
-    tmp_path: Path,
+def test_nested_sidecar_preserves_relative_subdirectories(
+    manager: Assets, images: FakeImages, tmp_path: Path
 ) -> None:
-    """An editor sidecar may store image_path as a bare local file name."""
-    _ = isolated_registry
+    folder = tmp_path / "sprites"
+    (folder / "frames").mkdir(parents=True)
+    image = folder / "frames" / "sheet.png"
+    image.touch()
+    write_config(
+        folder / "sheet.json", {"id": "sheet", "image_path": "frames/sheet.png"}
+    )
+    manager.load_asset("sprites/sheet.json")
+    assert images.loaded == [image]
 
+
+def test_asset_root_path_has_priority(
+    manager: Assets, images: FakeImages, tmp_path: Path
+) -> None:
+    (tmp_path / "sheet.png").touch()
     folder = tmp_path / "sprites"
     folder.mkdir()
-    image_path = folder / "sheet.png"
-    image_path.write_text("x", encoding="utf-8")
-    config_path = folder / "sheet.json"
-    config_path.write_text(
-        '{"id": "sheet", "type": "spritesheet", '
-        '"image_path": "sheet.png", '
-        '"regions": {"tile1": [0, 0, 16, 16]}}',
-        encoding="utf-8",
-    )
-
-    loader = DummyLoader()
-    # pyrefly: ignore [bad-argument-type]
-    manager = assets_module.Assets(asset_base_path=tmp_path, loader=loader)
-    manager.load_spritesheet("sprites/sheet.json")
-
-    assert loader.dict_calls[0][1] == image_path
-    assert manager.get_texture_data("tile1").parent_id == "sheet"
+    (folder / "sheet.png").touch()
+    write_config(folder / "sheet.json", {"id": "sheet", "image_path": "sheet.png"})
+    manager.load_asset("sprites/sheet.json")
+    assert images.loaded == [tmp_path / "sheet.png"]
 
 
-def test_asset_manager_falls_back_to_sidecar_for_prefixed_image_path(
-    isolated_registry: pu.UnitRegistry,
-    tmp_path: Path,
+@pytest.mark.parametrize("method", ["load_asset", "load_spritesheet", "load_folder"])
+def test_asset_manager_rejects_path_traversal(manager: Assets, method: str) -> None:
+    with pytest.raises(ValueError, match="escapes base directory"):
+        getattr(manager, method)("../outside")
+
+
+def test_config_image_and_context_must_stay_inside_base(
+    manager: Assets, tmp_path: Path
 ) -> None:
-    """A legacy asset-root path can still use the image next to the sidecar."""
-    _ = isolated_registry
-
-    folder = tmp_path / "examples" / "data" / "tile"
-    folder.mkdir(parents=True)
-    image_path = folder / "sheet.png"
-    image_path.write_text("x", encoding="utf-8")
-    config_path = folder / "sheet.json"
-    config_path.write_text(
-        '{"id": "sheet", "type": "spritesheet", '
-        '"image_path": "tile/sheet.png", "regions": {}}',
-        encoding="utf-8",
-    )
-
-    loader = DummyLoader()
-    # pyrefly: ignore [bad-argument-type]
-    manager = assets_module.Assets(asset_base_path=tmp_path, loader=loader)
-    manager.load_spritesheet("examples/data/tile/sheet.json")
-
-    assert loader.dict_calls[0][1] == image_path
+    (tmp_path / "hero.png").touch()
+    with pytest.raises(ValueError, match="escapes base directory"):
+        manager.load_from_dict({"id": "evil", "image_path": "../outside.png"})
+    with pytest.raises(ValueError, match="escapes base directory"):
+        manager.load_from_dict({
+            "id": "evil",
+            "image_path": "hero.png",
+            "config_path": tmp_path.parent / "evil.json",
+        })
 
 
-def test_asset_manager_rejects_path_traversal(
-    isolated_registry: pu.UnitRegistry,
-    tmp_path: Path,
-) -> None:
-    _ = isolated_registry
-
-    base_path = tmp_path / "data"
-    base_path.mkdir()
-
-    (tmp_path / "outside.png").write_text("x", encoding="utf-8")
-
-    manager = assets_module.Assets(
-        asset_base_path=base_path,
-        # pyrefly: ignore [bad-argument-type]
-        loader=DummyLoader(),
-    )
-
-    with pytest.raises(ValueError, match="escapes base path"):
-        manager.load_asset("../outside.png")
+def test_resolve_inside_normalizes_base(tmp_path: Path) -> None:
+    folder = tmp_path / "data"
+    folder.mkdir()
+    assert resolve_inside(folder / ".." / "data", "image.png") == folder / "image.png"
+    with pytest.raises(ValueError, match="escapes"):
+        resolve_inside(folder, tmp_path / "outside.png")
 
 
-def test_asset_manager_rejects_config_image_outside_base(
-    isolated_registry: pu.UnitRegistry,
-    tmp_path: Path,
-) -> None:
-    _ = isolated_registry
-
-    base_path = tmp_path / "data"
-    base_path.mkdir()
-
-    (tmp_path / "outside.png").write_text("x", encoding="utf-8")
-
-    config_path = base_path / "evil.json"
-    config_path.write_text(
-        '{"id": "evil", "image_path": "../outside.png", "texture": {}}',
-        encoding="utf-8",
-    )
-
-    manager = assets_module.Assets(
-        asset_base_path=base_path,
-        # pyrefly: ignore [bad-argument-type]
-        loader=DummyLoader(),
-    )
-
-    with pytest.raises(ValueError, match="escapes base path"):
-        manager.load_asset("evil.json")
+def test_sidecar_path_cannot_escape_or_discard_components(tmp_path: Path) -> None:
+    folder = tmp_path / "data"
+    folder.mkdir()
+    (folder / "image.png").touch()
+    context = folder / "sheet.json"
+    missing = resolve_config_resource(tmp_path, "missing/image.png", context)
+    assert missing == tmp_path / "missing" / "image.png"
+    with pytest.raises(ValueError, match="escapes"):
+        resolve_config_resource(tmp_path, "../image.png", context)
 
 
-def test_asset_manager_load_from_dict_auto_image_and_missing(
-    isolated_registry: pu.UnitRegistry,
-    tmp_path: Path,
-) -> None:
-    _ = isolated_registry
+def test_symlink_escape_is_rejected(manager: Assets, tmp_path: Path) -> None:
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.png"
+    outside.touch()
+    link = tmp_path / "link.png"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        outside.unlink(missing_ok=True)
+        pytest.skip("Windows symlink creation requires suitable privileges")
+    try:
+        with pytest.raises(ValueError, match="escapes"):
+            manager.load_asset("link.png")
+    finally:
+        outside.unlink(missing_ok=True)
 
-    loader = DummyLoader()
-    # pyrefly: ignore [bad-argument-type]
-    manager = assets_module.Assets(asset_base_path=tmp_path, loader=loader)
 
-    config_path = tmp_path / "enemy.json"
-    config_path.write_text('{"id": "enemy", "texture": {}}', encoding="utf-8")
-
-    image_path = tmp_path / "enemy.png"
-    image_path.write_text("x", encoding="utf-8")
-
-    config_data = {
-        "id": "enemy",
-        "texture": {},
-        "config_path": config_path,
-        "image_path": "enemy.png",
-    }
-    manager.load_from_dict(config_data, asset_id=None)
-    # pyrefly: ignore [missing-attribute]
-    assert manager.get_asset("enemy").name == "dict:enemy.png"
-
-    missing_path = tmp_path / "ghost.json"
-    missing_path.write_text('{"id": "ghost", "texture": {}}', encoding="utf-8")
-
-    config_data = {
-        "id": "ghost",
-        "texture": {},
-        "config_path": missing_path,
-        "image_path": "ghost.png",
-    }
+def test_load_from_dict_does_not_mutate_input(manager: Assets, tmp_path: Path) -> None:
+    (tmp_path / "enemy.png").touch()
+    data = {"id": "enemy", "image_path": "enemy.png", "texture": {}}
+    manager.load_from_dict(data)
+    assert data == {"id": "enemy", "image_path": "enemy.png", "texture": {}}
+    assert manager["enemy"].texture_id == "enemy"
     with pytest.raises(FileNotFoundError):
-        manager.load_from_dict(config_data, asset_id=None)
+        manager.load_from_dict({"id": "ghost", "image_path": "ghost.png"})
 
 
-def test_asset_manager_load_folder_processes_configs_and_images(
-    isolated_registry: pu.UnitRegistry,
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_load_folder_processes_configs_once(
+    manager: Assets, images: FakeImages, tmp_path: Path
 ) -> None:
-    _ = isolated_registry
-
-    # pyrefly: ignore [bad-argument-type]
-    manager = assets_module.Assets(asset_base_path=tmp_path, loader=DummyLoader())
-
     folder = tmp_path / "sprites"
     folder.mkdir()
-
-    (folder / "hero.png").write_text("x", encoding="utf-8")
-    (folder / "hero.json").write_text(
-        '{"id": "hero", "image_path": "sprites/hero.png", "texture": {}}',
-        encoding="utf-8",
-    )
-    (folder / "coin.png").write_text("x", encoding="utf-8")
-
+    for name in ("hero.png", "coin.PNG"):
+        (folder / name).touch()
+    write_config(folder / "hero.json", {"id": "hero", "image_path": "hero.png"})
+    write_config(folder / "animations.json", {"animations": {}})
     manager.load_folder("sprites")
-
-    # Configs are processed via load_from_dict, standalone images via load_asset.
-    assert "hero" in manager._textures
-    assert manager._configs["hero"].id == "hero"
-    assert manager.get_source_rect("hero") == (0.0, 0.0, 100.0, 100.0)
-    assert "coin" in manager._textures
-
-    with pytest.raises(FileNotFoundError, match="Folder tidak ada"):
+    assert images.loaded == [folder / "hero.png", folder / "coin.PNG"]
+    assert set(manager.all_assets) == {"hero", "coin"}
+    with pytest.raises(FileNotFoundError):
         manager.load_folder("missing")
 
 
-def test_asset_manager_unload_asset_paths(
-    isolated_registry: pu.UnitRegistry,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _ = isolated_registry
+def test_load_folder_respects_extensions(manager: Assets, tmp_path: Path) -> None:
+    (tmp_path / "hero.png").touch()
+    (tmp_path / "icon.bmp").touch()
+    manager.load_folder(".", allow_extensions=[".bmp"])
+    assert set(manager.all_assets) == {"icon"}
+    manager.clear_all()
+    manager.load_folder(".", allow_extensions=[])
+    assert manager.all_assets == {}
 
-    # pyrefly: ignore [bad-argument-type]
-    manager = assets_module.Assets(loader=DummyLoader())
-    manager._textures["hero"] = TextureData(
-        id="hero",
-        texture="tex",  # type: ignore[arg-type]
-        parent_id="hero",
-        source_rect=(0, 0, 0, 0),
+
+def test_missing_image_fails_before_decode(manager: Assets, images: FakeImages) -> None:
+    with pytest.raises(FileNotFoundError):
+        manager.load_asset("missing.png")
+    assert images.loaded == []
+
+
+def test_unload_region_does_not_free_parent(manager: Assets, gpu: FakeGPU) -> None:
+    manager.store_texture("sheet", gpu.texture("sheet", 32, 32))
+    manager._put(
+        manager["sheet"].derive(
+            texture_id="tile", parent_id="sheet", source_rect=(0.0, 0.0, 8.0, 8.0)
+        )
     )
-
-    loader = manager._loader
-    calls: list[str] = []
-    monkeypatch.setattr(loader, "unload_texture", lambda tex: calls.append(str(tex)))
-
-    manager.unload_asset("hero")
-    assert "hero" not in manager._textures
-    assert calls == ["tex"]
-
+    manager.unload_asset("tile")
     manager.unload_asset("missing")
+    assert manager.is_valid("sheet")
+    assert gpu.unloaded == []
 
 
-def test_asset_manager_destroy_unloads_cached_textures(
-    isolated_registry: pu.UnitRegistry,
-    monkeypatch: pytest.MonkeyPatch,
+def test_destroy_unloads_each_owned_resource_once(
+    manager: Assets, gpu: FakeGPU
 ) -> None:
-    _ = isolated_registry
-
-    # pyrefly: ignore [bad-argument-type]
-    manager = assets_module.Assets(loader=DummyLoader())
-    manager._textures["hero"] = TextureData(
-        id="hero",
-        texture="tex:hero",  # type: ignore[arg-type]
-        parent_id="hero",
-        source_rect=(0, 0, 0, 0),
-    )
-    manager._textures["coin"] = TextureData(
-        id="coin",
-        texture="tex:coin",  # type: ignore[arg-type]
-        parent_id="coin",
-        source_rect=(0, 0, 0, 0),
-    )
-
-    loader = manager._loader
-    calls: list[str] = []
-    monkeypatch.setattr(loader, "unload_texture", lambda tex: calls.append(str(tex)))
-
+    for name in ("hero", "coin"):
+        manager.store_texture(name, gpu.texture(name, 8, 8))
     manager.destroy()
-
-    assert calls == ["tex:hero", "tex:coin"]
-    assert manager._textures == {}
+    manager.destroy()
+    assert [raw.name for raw in gpu.unloaded] == ["hero", "coin"]
+    assert manager.all_assets == {}
+    assert manager._regions == {}

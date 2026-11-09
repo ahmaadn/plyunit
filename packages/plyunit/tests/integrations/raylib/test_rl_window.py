@@ -4,9 +4,9 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.core.window as win_mod
-from plyunit.backends.integrations.raylib.core import Window
-from plyunit.backends.interfaces import IWindow
+import plyunit.backends.integrations.raylib.window as win_mod
+from plyunit.backends.integrations.raylib.window import Window
+from plyunit.backends.ports.renderer import IWindow
 from plyunit.core.units import ServiceUnit
 
 
@@ -47,3 +47,42 @@ def test_raylib_window_lifecycle(fake_pr):
     assert ("begin",) in calls
     assert ("end",) in calls
     assert ("close",) in calls
+
+
+def test_raylib_window_accepts_uncapped_fps(fake_pr: list[tuple]) -> None:
+    """The window accepts the zero FPS cap documented by AppConfig."""
+    window = Window()
+    window.set_target_fps(0)
+    assert ("fps", 0) in fake_pr
+    with pytest.raises(ValueError, match=">= 0"):
+        window.set_target_fps(-1)
+
+
+def test_loading_frame_always_ends_drawing(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A loading-screen exception must still finish its native drawing frame."""
+    calls: list[str] = []
+
+    def fail_clear(color: object) -> None:
+        raise RuntimeError("clear failed")
+
+    monkeypatch.setattr(
+        win_mod,
+        "pr",
+        SimpleNamespace(
+            begin_drawing=lambda: calls.append("begin"),
+            clear_background=fail_clear,
+            end_drawing=lambda: calls.append("end"),
+        ),
+    )
+    with pytest.raises(RuntimeError, match="clear failed"):
+        Window().present_loading_frame((0, 0, 0, 255))
+    assert calls == ["begin", "end"]
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf")])
+def test_time_scale_rejects_nonfinite_values(value: float) -> None:
+    """Non-finite scale cannot poison the fixed-step accumulator."""
+    window = Window()
+    with pytest.raises(ValueError, match="finite"):
+        window.set_time_scale(value)
+    assert window.time_scale == 1.0

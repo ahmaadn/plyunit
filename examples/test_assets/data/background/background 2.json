@@ -1,13 +1,33 @@
 {
   "id": "background/Background_2",
-  "type": "spritesheet",
-  "name": "background 2",
-  "image_path": "background/background 2.png",
+  "image_path": "D:\\Dev\\!Project-Me\\plyunit\\examples\\test_assets\\data\\background\\background 2.png",
+  "config_path": "D:\\Dev\\!Project-Me\\plyunit\\examples\\test_assets\\data\\background\\background 2.json",
   "texture": {
     "filter": "nearest",
     "wrap": "clamp",
     "mipmap": false,
-    "premultiply_alpha": false
+    "srgb": true,
+    "premultiply_alpha": false,
+    "color_key": [
+      0,
+      0,
+      0,
+      255
+    ]
   },
-  "regions": {}
+  "type": "spritesheet",
+  "regions": {
+    "background 2_18_10": [
+      288.0,
+      160.0,
+      16.0,
+      16.0
+    ],
+    "background 2_24_13": [
+      384.0,
+      208.0,
+      16.0,
+      16.0
+    ]
+  }
 }

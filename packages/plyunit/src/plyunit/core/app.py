@@ -8,7 +8,7 @@ lifecycle signals, fixed-step scheduling, and shutdown orchestration, plus the
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from plyunit.core.logging import configure_logging
 from plyunit.core.units.service_unit import ServiceUnit
@@ -22,12 +22,11 @@ from .schema_config import (
 )
 
 if TYPE_CHECKING:
-    from packages.plyunit.src.plyunit.backends.interfaces import IWindow
-    from plyunit.assets import Assets
-    from plyunit.assets.animations import Animations
-    from plyunit.backends.interfaces import ICamera2D, ICanvas2D
-    from plyunit.core.units.service_unit import ServiceUnit
+    from plyunit.backends.ports.assets import IAssets
+    from plyunit.backends.ports.camera2d import ICamera2D
+    from plyunit.backends.ports.renderer import ICanvas2D, IWindow
     from plyunit.rendering import Renderer
+    from plyunit.services.animations import Animations
     from plyunit.services.scene_manager import SceneManager
 
 
@@ -79,15 +78,16 @@ class App(ServiceUnit):
         self.on_after_update = Signal("on_app_after_update")
         self.on_end_update = Signal("on_app_end_update")
 
-        # Services
-        self.config: AppConfig = None
-        self.window: IWindow = None
-        self.canvas: ICanvas2D = None
-        self.renderer: Renderer = None
-        self.scene_manager: SceneManager = None
-        self.assets: Assets = None
-        self.animations: Animations = None
-        self.camera: ICamera2D = None
+        # Composition fills services before game hooks run. None marks services
+        # that are uninitialized, explicitly disabled, or released by shutdown.
+        self.config: AppConfig | None = None
+        self.window: IWindow = cast("IWindow", None)
+        self.canvas: ICanvas2D = cast("ICanvas2D", None)
+        self.renderer: Renderer = cast("Renderer", None)
+        self.scene_manager: SceneManager = cast("SceneManager", None)
+        self.assets: IAssets = cast("IAssets", None)
+        self.animations: Animations = cast("Animations", None)
+        self.camera: ICamera2D = cast("ICamera2D", None)
 
         # Fixed-step catch-up bookkeeping (set each wall-clock frame).
         self._last_fixed_steps: int = 0
@@ -129,8 +129,6 @@ class App(ServiceUnit):
     ):
         """Applies configuration to the window clock and (optionally) logging.
 
-        The signature still accepts ``config`` for backward compatibility
-        with subclasses that still call ``self.init(...)``.
 
         Args:
             config: Configuration file path, an ``AppConfig`` instance, or
@@ -153,11 +151,13 @@ class App(ServiceUnit):
             self.window.clear_background((245, 245, 245, 255))
             self.window.end_drawing()
 
+            if self.camera is not None:
+                self.camera.setup(self.config.window_width, self.config.window_height)
+
             if self.renderer is not None:
                 self.renderer.init()
 
-            if self.config.target_fps > 0:
-                self.window.set_target_fps(self.config.target_fps)
+            self.window.set_target_fps(self.config.target_fps)
 
         if self.window is not None:
             self.window.set_fixed_timestep_hz(self.config.fixed_update_hz)
@@ -274,13 +274,13 @@ class App(ServiceUnit):
 
         # Release direct service fields after hooks and resource cleanup. The
         # registry is the sole owner for query-located services.
-        self.window = None
-        self.canvas = None
-        self.scene_manager = None
-        self.animations = None
-        self.assets = None
-        self.renderer = None
-        self.camera = None
+        self.window = cast("IWindow", None)
+        self.canvas = cast("ICanvas2D", None)
+        self.scene_manager = cast("SceneManager", None)
+        self.animations = cast("Animations", None)
+        self.assets = cast("IAssets", None)
+        self.renderer = cast("Renderer", None)
+        self.camera = cast("ICamera2D", None)
         self.global_units.unregister(self)
 
         if failures:
@@ -398,7 +398,7 @@ class App(ServiceUnit):
                 self.camera.update(self.window.unscaled_dt)
                 self.renderer.reset_frame()
                 self.window.begin_drawing()
-                self.window.clear_background(self.config.background_color)
+                self.window.clear_background((24, 32, 48, 255))
                 self.scene_manager.render(self.renderer)
                 self.renderer.flush_all(camera=self.camera)
                 self.window.end_drawing()

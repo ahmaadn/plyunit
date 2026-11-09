@@ -1,309 +1,362 @@
+"""Listener, bus, loading, and music-ownership regression tests."""
+
 from __future__ import annotations
 
 import importlib
+import json
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from fake_raylib import FakeRaylib, make_listener
 
-from plyunit.audio.service import Audio
-from plyunit.events.signal import Signal
+from plyunit.backends.integrations.raylib.audio import Audio
 from plyunit.core.units.unit_registry import UnitRegistry
-
-# pyrefly: ignore [missing-import]
-from fake_backend import FakeBackend
+from plyunit.events.signal import Signal
+from plyunit.services.audio import VoiceId
 
 
 @pytest.fixture(autouse=True)
 def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> UnitRegistry:
+    """Provide independent global service ownership.
+
+    Args:
+        monkeypatch: Pytest patch manager.
+
+    Returns:
+        The test registry.
+    """
     registry = UnitRegistry()
-    unit_module = importlib.import_module("plyunit.core.units.unit")
-    monkeypatch.setattr(unit_module, "units", registry)
+    monkeypatch.setattr(
+        importlib.import_module("plyunit.core.units.unit"), "units", registry
+    )
     return registry
 
 
-@pytest.fixture()
+@pytest.fixture
 def audio_dir(tmp_path: Path) -> Path:
-    (tmp_path / "sfx").mkdir()
-    (tmp_path / "music").mkdir()
-    (tmp_path / "sfx" / "a.wav").write_bytes(b"x")
-    (tmp_path / "music" / "m.ogg").write_bytes(b"y")
+    """Create paths accepted by the mocked native loaders.
+
+    Args:
+        tmp_path: Test temporary directory.
+
+    Returns:
+        The audio asset directory.
+    """
+    (tmp_path / "a.wav").write_bytes(b"RIFF")
+    (tmp_path / "m.ogg").write_bytes(b"OggS")
     return tmp_path
 
 
-@pytest.fixture()
-def svc(audio_dir: Path) -> tuple[Audio, FakeBackend]:
-    backend = FakeBackend()
-    service = Audio(backend, assets_path=audio_dir, max_voices=4)
+@pytest.fixture
+def raylib(monkeypatch: pytest.MonkeyPatch) -> FakeRaylib:
+    """Replace only the audio integration's pyray calls.
+
+    Args:
+        monkeypatch: Pytest patch manager.
+
+    Returns:
+        The native call test double.
+    """
+    fake = FakeRaylib()
+    module = importlib.import_module("plyunit.backends.integrations.raylib.audio")
+    monkeypatch.setattr(module, "pr", fake)
+    handler = importlib.import_module("plyunit.backends.integrations.raylib.handler")
+    monkeypatch.setattr(handler, "pr", fake)
+    return fake
+
+
+@pytest.fixture
+def svc(audio_dir: Path, raylib: FakeRaylib) -> Iterator[tuple[Audio, FakeRaylib]]:
+    """Create an attached audio service with guaranteed teardown.
+
+    Args:
+        audio_dir: Audio asset directory.
+        raylib: Native call test double.
+
+    Yields:
+        The audio service and native call test double.
+    """
+    service = Audio(assets_path=audio_dir, max_voices=4)
     app = SimpleNamespace(on_start_frame=Signal("on_start_frame"))
-    service.on_attach(app)  # type: ignore[arg-type]
-    return service, backend
+    service.on_attach(app)
+    yield service, raylib
+    service.on_detach(app)
 
 
-def test_reload_sound_unloads_previous(
-    svc: tuple[Audio, FakeBackend],
-) -> None:
-    service, _ = svc
-    service.load_sound("sfx/a.wav", sound_id="a")
-    service.play_sound("a")
-    service.load_sound("sfx/a.wav", sound_id="a")
-    assert "a" in service._sounds  # noqa: SLF001
+def test_reload_sound_unloads_previous(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Reload stops/unloads all old aliases before freeing their samples."""
+    service, native = svc
+    service.load_sound("a.wav", sound_id="a")
+    old = service._sounds["a"].raw
+    voice = service.play_sound("a")
+    alias = native.aliases[-1]
+    service.load_sound("a.wav", sound_id="a")
+    assert alias.unloaded
+    assert old.unloaded
+    assert not service.is_voice_playing(voice)
+    assert service._sounds["a"].raw is not old
+    assert native.calls.index(("unload_sound_alias", alias)) < native.calls.index((
+        "unload_sound",
+        old,
+    ))
 
 
-def test_unload_music_while_playing(
-    svc: tuple[Audio, FakeBackend],
-) -> None:
-    service, _ = svc
-    service.load_music("music/m.ogg", music_id="m")
-    service.play_music("m")
+def test_failed_sound_reload_preserves_previous(svc: tuple[Audio, FakeRaylib]) -> None:
+    """An invalid replacement does not destroy the usable loaded sound."""
+    service, native = svc
+    service.load_sound("a.wav", sound_id="a")
+    old = service._sounds["a"].raw
+    voice = service.play_sound("a")
+    native.invalid_sound = True
+    with pytest.raises(RuntimeError, match="load sound"):
+        service.load_sound("a.wav", sound_id="a")
+    assert service._sounds["a"].raw is old
+    assert service.is_voice_playing(voice)
+    assert not old.unloaded
+
+
+def test_unload_music_while_playing(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Unloading active music stops its decoder and invalidates ownership."""
+    service, native = svc
+    service.load_music("m.ogg", music_id="m")
+    raw = service._music["m"].raw
+    generation = service.play_music("m")
     service.unload_music("m")
-    assert not service.is_music_playing()
+    service.unload_music("m")
     assert service.active_music_id is None
+    assert not service.owns_music(generation, "m")
+    assert raw.unloaded
+    assert native.calls.count(("unload_music_stream", raw)) == 1
 
 
-def test_pause_resume_music(svc: tuple[Audio, FakeBackend]) -> None:
-    service, backend = svc
-    service.load_music("music/m.ogg", music_id="m")
-    service.play_music("m")
+def test_pause_resume_music_preserves_ownership(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Paused streams retain ownership and are not mistaken for completion."""
+    service, native = svc
+    service.load_music("m.ogg", music_id="m")
+    generation = service.play_music("m")
+    raw = service._music["m"].raw
     service.pause_music()
-    assert backend.music_playing[service._music["m"].raw] is False  # noqa: SLF001
+    service.pause_music()
+    assert not service.is_music_playing()
+    assert service.owns_music(generation, "m")
+    service._on_start_frame()
+    assert native.updated == []
+    assert service.music_generation == generation
+    service.set_music_volume(0.25)
+    assert raw.volume == pytest.approx(0.25)
     service.resume_music()
-    assert backend.music_playing[service._music["m"].raw] is True  # noqa: SLF001
+    service.resume_music()
+    assert service.is_music_playing()
+    assert service.owns_music(generation, "m")
+    assert native.calls.count(("pause_music_stream", raw)) == 1
+    assert native.calls.count(("resume_music_stream", raw)) == 1
 
 
-def test_set_music_volume_bus(svc: tuple[Audio, FakeBackend]) -> None:
-    service, backend = svc
-    service.load_music("music/m.ogg", music_id="m")
-    service.play_music("m", volume=1.0)
-    service.set_music_volume(0.5)
-    raw = service._music["m"].raw  # noqa: SLF001
-    assert abs(backend.music_volume[raw] - 0.5) < 1e-6
-
-
-def test_set_sfx_volume_updates_non_tracked(
-    svc: tuple[Audio, FakeBackend],
+def test_music_completion_relinquishes_generation(
+    svc: tuple[Audio, FakeRaylib],
 ) -> None:
-    service, backend = svc
-    service.load_sound("sfx/a.wav", sound_id="a")
-    service.play_sound("a", volume=1.0)
-    service.set_sfx_volume(0.25)
-    assert abs(backend.playing_voices[1]["volume"] - 0.25) < 1e-6
+    """Natural non-looping completion invalidates tokens and stops pumping."""
+    service, native = svc
+    service.load_music("m.ogg", music_id="m", default_loop=False)
+    generation = service.play_music("m")
+    native.finish_music_on_update = True
+    service._on_start_frame()
+    assert service.active_music_id is None
+    assert not service.owns_music(generation)
+    assert service.music_generation > generation
+    service._on_start_frame()
+    assert len(native.updated) == 1
 
 
-def test_getters(svc: tuple[Audio, FakeBackend]) -> None:
+def test_same_music_replay_invalidates_old_generation(
+    svc: tuple[Audio, FakeRaylib],
+) -> None:
+    """Replaying the same asset is a distinct music ownership generation."""
     service, _ = svc
-    service.set_master_volume(0.2)
-    service.set_sfx_volume(0.3)
+    service.load_music("m.ogg", music_id="m")
+    old = service.play_music("m")
+    new = service.play_music("m")
+    assert new > old
+    assert not service.owns_music(old, "m")
+    assert service.owns_music(new, "m")
+    assert not service.owns_music(new, "another")
+
+
+def test_second_music_stops_first(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Switching tracks stops the previous stream and changes ownership."""
+    service, _ = svc
+    service.load_music("m.ogg", music_id="first")
+    service.load_music("m.ogg", music_id="second")
+    raw = service._music["first"].raw
+    first = service.play_music("first")
+    second = service.play_music("second")
+    assert not raw.playing
+    assert not service.owns_music(first, "first")
+    assert service.owns_music(second, "second")
+
+
+def test_set_sfx_volume_updates_all_voice_modes(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Bus changes preserve tracked and frozen spatial attenuation."""
+    service, native = svc
+    service.load_sound("a.wav", sound_id="a")
+    service.play_sound("a")
+    service.play_sound_at("a", 425.0, 0.0, track=True)
+    service.play_sound_at("a", 425.0, 0.0, track=False)
+    service.set_sfx_volume(0.25)
+    direct, tracked, frozen = native.aliases
+    assert direct.volume == pytest.approx(0.25)
+    assert tracked.volume == pytest.approx(0.125)
+    assert frozen.volume == pytest.approx(0.125)
+    original_pan = frozen.pan
+    service.set_listener(425.0, 0.0)
+    service.set_sfx_volume(0.5)
+    assert tracked.volume == pytest.approx(0.5)
+    assert frozen.volume == pytest.approx(0.25)
+    assert frozen.pan == original_pan
+
+
+def test_bus_getters_and_clamping(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Finite bus values are clamped and reflected in public properties."""
+    service, _ = svc
+    service.set_master_volume(-1.0)
+    service.set_sfx_volume(2.0)
     service.set_music_volume(0.4)
-    assert service.master_volume == 0.2
-    assert service.sfx_volume == 0.3
+    assert service.master_volume == 0.0
+    assert service.sfx_volume == 1.0
     assert service.music_volume == 0.4
-    assert service.listener == (0.0, 0.0)
-    service.set_listener(1.0, 2.0)
-    assert service.listener == (1.0, 2.0)
-    assert service.listener_node is None
 
 
-def test_set_listener_follow_node(svc: tuple[Audio, FakeBackend]) -> None:
-    service, backend = svc
-    service.load_sound("sfx/a.wav", sound_id="a")
-
-    class FakeWorld:
-        position = (10.0, 20.0)
-
-    class FakeTransform:
-        world = FakeWorld()
-
-    class FakeNode:
-        transform = FakeTransform()
-
-    node = FakeNode()
+def test_listener_follow_updates_spatial_pan(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Moving the listener updates tracked aliases each frame."""
+    service, native = svc
+    service.load_sound("a.wav", sound_id="a")
+    node = make_listener(10.0, 20.0)
     service.set_listener(node)
     assert service.listener == (10.0, 20.0)
     assert service.listener_node is node
-
-    # tracked voice updates when node moves + frame sync
-    vid = service.play_sound_at("a", 10.0, 20.0, track=True)
-    FakeWorld.position = (100.0, 20.0)
-    service._on_start_frame()  # noqa: SLF001
+    service.play_sound_at("a", 10.0, 20.0, track=True)
+    node.transform.world.position = (100.0, 20.0)
+    service._on_start_frame()
     assert service.listener == (100.0, 20.0)
-    # source still at (10,20), listener at (100,20) → pan left of center
-    assert backend.playing_voices[vid]["pan"] < 0.5
-
-    # fixed coords clear follow
+    assert native.aliases[-1].pan < 0.0
     service.set_listener(0.0, 0.0)
     assert service.listener_node is None
-    assert service.listener == (0.0, 0.0)
 
 
-def test_set_listener_node_without_transform_raises(
-    svc: tuple[Audio, FakeBackend],
-) -> None:
+def test_listener_reads_live_without_voices(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Following caches the latest position even without tracked playback."""
     service, _ = svc
-    with pytest.raises(TypeError, match="transform"):
-        service.set_listener(object())
-
-
-def test_clear_listener_follow(svc: tuple[Audio, FakeBackend]) -> None:
-    service, _ = svc
-
-    class FakeWorld:
-        position = (5.0, 6.0)
-
-    class FakeTransform:
-        world = FakeWorld()
-
-    class FakeNode:
-        transform = FakeTransform()
-
-    service.set_listener(FakeNode())
-    service.clear_listener_follow()
+    node = make_listener(1.0, 2.0)
+    service.set_listener(node)
+    node.transform.world.position = (9.0, 8.0)
+    service._on_start_frame()
+    del node.transform
+    assert service.listener == (9.0, 8.0)
     assert service.listener_node is None
+
+
+def test_clear_listener_follow(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Clearing follow preserves the latest world position."""
+    service, _ = svc
+    node = make_listener(5.0, 6.0)
+    service.set_listener(node)
+    node.transform.world.position = (7.0, 8.0)
+    service.clear_listener_follow()
+    node.transform.world.position = (100.0, 100.0)
+    assert service.listener_node is None
+    assert service.listener == (7.0, 8.0)
+
+
+@pytest.mark.parametrize("node", [object(), SimpleNamespace(transform=object())])
+def test_invalid_listener_does_not_replace_follow(
+    svc: tuple[Audio, FakeRaylib], node: object
+) -> None:
+    """Malformed listeners raise without discarding the current listener."""
+    service, _ = svc
+    valid = make_listener(5.0, 6.0)
+    service.set_listener(valid)
+    with pytest.raises(TypeError, match="transform"):
+        service.set_listener(node)
+    assert service.listener_node is valid
     assert service.listener == (5.0, 6.0)
 
 
-def test_listener_property_reads_node_live(
-    svc: tuple[Audio, FakeBackend],
-) -> None:
-    service, _ = svc
-
-    class FakeWorld:
-        position = (1.0, 2.0)
-
-    class FakeTransform:
-        world = FakeWorld()
-
-    class FakeNode:
-        transform = FakeTransform()
-
-    service.set_listener(FakeNode())
-    FakeWorld.position = (9.0, 8.0)
-    # Without waiting for on_start_frame — property reads node live
-    assert service.listener == (9.0, 8.0)
-
-
+@pytest.mark.parametrize(
+    "values",
+    [(-1, 10, 1), (10, 5, 1), (1, 10, 0), (0, float("inf"), 1), (0, 10, float("nan"))],
+)
 def test_set_spatial_params_validation(
-    svc: tuple[Audio, FakeBackend],
+    svc: tuple[Audio, FakeRaylib], values: tuple[float, float, float]
 ) -> None:
+    """Invalid or non-finite spatial parameters never reach native audio."""
     service, _ = svc
     with pytest.raises(ValueError):
-        service.set_spatial_params(-1, 10)
-    with pytest.raises(ValueError):
-        service.set_spatial_params(10, 5)
-    with pytest.raises(ValueError):
-        service.set_spatial_params(1, 10, 0)
-    service.set_spatial_params(1.0, 100.0, 1.5)
+        service.set_spatial_params(*values)
 
 
-def test_default_volume_from_entry(
-    svc: tuple[Audio, FakeBackend],
+def test_spatial_parameter_change_refreshes_tracked(
+    svc: tuple[Audio, FakeRaylib],
 ) -> None:
-    service, backend = svc
-    service.load_sound("sfx/a.wav", sound_id="a", default_volume=0.5)
-    service.play_sound("a")
-    assert abs(backend.playing_voices[1]["volume"] - 0.5) < 1e-6
+    """Changing global attenuation updates live tracked voices immediately."""
+    service, native = svc
+    service.load_sound("a.wav", sound_id="a", default_volume=0.5)
+    service.play_sound_at("a", 50.0, 0.0, track=True)
+    service.set_spatial_params(0.0, 100.0, 2.0)
+    assert native.aliases[-1].volume == pytest.approx(0.125)
 
 
-def test_second_music_stops_first(
-    svc: tuple[Audio, FakeBackend], audio_dir: Path
-) -> None:
-    service, _ = svc
-    (audio_dir / "music" / "m2.ogg").write_bytes(b"z")
-    service.load_music("music/m.ogg", music_id="m1")
-    service.load_music("music/m2.ogg", music_id="m2")
-    g1 = service.play_music("m1")
-    g2 = service.play_music("m2")
-    assert not service.owns_music(g1, "m1")
-    assert service.owns_music(g2, "m2")
-    assert service.active_music_id == "m2"
-    assert service.music_generation == g2
+def test_unknown_or_untracked_position_is_noop(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Only tracked tokens accept position updates."""
+    service, native = svc
+    service.load_sound("a.wav", sound_id="a")
+    voice = service.play_sound("a")
+    before = list(native.calls)
+    service.set_voice_position(voice, 10.0, 20.0)
+    service.set_voice_position(VoiceId(999), 10.0, 20.0)
+    assert native.calls == before
 
 
-def test_stop_music_when_none(svc: tuple[Audio, FakeBackend]) -> None:
-    service, _ = svc
-    service.stop_music()
-    service.pause_music()
-    service.resume_music()
-    assert not service.is_music_playing()
-
-
-def test_set_voice_position_unknown(
-    svc: tuple[Audio, FakeBackend],
-) -> None:
-    service, _ = svc
-    from plyunit.audio.types import VoiceId
-
-    service.set_voice_position(VoiceId(999), 1.0, 2.0)
-
-
-def test_clear_all(svc: tuple[Audio, FakeBackend]) -> None:
-    service, _ = svc
-    service.load_sound("sfx/a.wav", sound_id="a")
-    service.load_music("music/m.ogg", music_id="m")
+def test_clear_all(svc: tuple[Audio, FakeRaylib]) -> None:
+    """Clearing all resources retains the live device and is idempotent."""
+    service, native = svc
+    service.load_sound("a.wav", sound_id="a")
+    service.load_music("m.ogg", music_id="m")
     service.play_sound("a")
     service.play_music("m")
     service.clear_all()
-    assert service._sounds == {}  # noqa: SLF001
-    assert service._music == {}  # noqa: SLF001
+    before = list(native.calls)
+    service.clear_all()
+    assert native.calls == before
+    assert service.active
+    assert service._sounds == {}
+    assert service._music == {}
+    assert service._voices == {}
 
 
-def test_attach_init_failure(audio_dir: Path) -> None:
-    backend = FakeBackend()
-
-    def boom() -> None:
-        raise RuntimeError("no device")
-
-    backend.init_device = boom  # type: ignore[method-assign]
-    service = Audio(backend, assets_path=audio_dir)
-    app = SimpleNamespace(on_start_frame=Signal("on_start_frame"))
-    service.on_attach(app)  # type: ignore[arg-type]
-    assert service.active is False
-
-
-def test_bank_missing_entry_fields(
-    svc: tuple[Audio, FakeBackend], audio_dir: Path
+@pytest.mark.parametrize(
+    "entry, message",
+    [({"id": "x"}, "id/path"), ({"id": "x", "path": "a.wav", "kind": "noise"}, "kind")],
+)
+def test_bank_invalid_entry(
+    svc: tuple[Audio, FakeRaylib], audio_dir: Path, entry: dict, message: str
 ) -> None:
-    import json
-
+    """Banks report missing fields and unknown kinds explicitly."""
     service, _ = svc
     (audio_dir / "bad.json").write_text(
-        json.dumps({"entries": [{"id": "x"}]}), encoding="utf-8"
+        json.dumps({"entries": [entry]}), encoding="utf-8"
     )
-    with pytest.raises(ValueError, match="id/path"):
+    with pytest.raises(ValueError, match=message):
         service.load_bank("bad.json")
 
 
-def test_bank_unknown_kind(
-    svc: tuple[Audio, FakeBackend], audio_dir: Path
-) -> None:
-    import json
-
-    service, _ = svc
-    (audio_dir / "bad2.json").write_text(
-        json.dumps(
-            {
-                "entries": [
-                    {"id": "x", "path": "sfx/a.wav", "kind": "noise"},
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    with pytest.raises(ValueError, match="kind"):
-        service.load_bank("bad2.json")
-
-
-def test_backend_property(svc: tuple[Audio, FakeBackend]) -> None:
-    service, backend = svc
-    assert service.backend is backend
-
-
-def test_start_frame_inactive(audio_dir: Path) -> None:
-    backend = FakeBackend()
-    service = Audio(backend, assets_path=audio_dir)
-    service._on_start_frame()  # noqa: SLF001
-
-
-def test_set_assets_path(svc: tuple[Audio, FakeBackend], tmp_path: Path) -> None:
-    service, _ = svc
-    service.set_assets_path(tmp_path / "other")
+def test_set_assets_path(svc: tuple[Audio, FakeRaylib], tmp_path: Path) -> None:
+    """Subsequent loads use the new asset directory."""
+    service, native = svc
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "b.wav").write_bytes(b"RIFF")
+    service.set_assets_path(other)
+    assert service.load_sound("b.wav") == "b"
+    assert str((other / "b.wav").resolve()) in native.sounds

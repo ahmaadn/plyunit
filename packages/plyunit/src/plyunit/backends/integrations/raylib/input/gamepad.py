@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 import pyray as pr
 
 from plyunit._constants import DEFAULT_DEADZONE
-from plyunit.backends.interfaces.i_input import IGamepad
+from plyunit.backends.ports.input import IGamepad
 from plyunit.core.units.service_unit import ServiceUnit
 
 if TYPE_CHECKING:

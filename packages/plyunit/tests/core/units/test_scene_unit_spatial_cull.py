@@ -3,7 +3,7 @@ from __future__ import annotations
 from plyunit.core.units.node_unit import NodeUnit
 from plyunit.core.units.scene_unit import SceneUnit
 from plyunit.core.units.unit import Unit
-from plyunit.services.spatial.spatial_index import SpatialIndex
+from packages.plyunit.src.plyunit.services.spatial_index import SpatialIndex
 
 
 class SubmitCounter(NodeUnit):

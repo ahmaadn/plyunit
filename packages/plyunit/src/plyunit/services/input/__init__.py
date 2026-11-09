@@ -1,17 +1,18 @@
-"""Engine input protocols and active-backend input implementations."""
+"""Backend-neutral input names and action-event data.
 
-from __future__ import annotations
+Backend input services live in ``plyunit.backends.integrations``. Importing
+these data types never selects or loads a backend.
+"""
 
-from plyunit.backends.integrations import Gamepad, Input, Mouse, Touch
-from plyunit.backends.interfaces.i_input import IGamepad, IInput, IMouse, ITouch
+from ._types import CursorShape, GamepadAxis, GamepadButton, MouseButton
+from .action_event import AxisBinding, InputEvents, MouseEvents
 
-__all__ = [
-    "Gamepad",
-    "IGamepad",
-    "IInput",
-    "IMouse",
-    "ITouch",
-    "Input",
-    "Mouse",
-    "Touch",
-]
+__all__ = (
+    "AxisBinding",
+    "CursorShape",
+    "GamepadAxis",
+    "GamepadButton",
+    "InputEvents",
+    "MouseButton",
+    "MouseEvents",
+)

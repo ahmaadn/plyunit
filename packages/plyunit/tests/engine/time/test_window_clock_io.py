@@ -5,8 +5,8 @@ from types import SimpleNamespace
 
 import pytest
 
-import plyunit.backends.integrations.raylib.core.window as window_module
-from plyunit.backends.integrations.raylib.core import Window
+import plyunit.backends.integrations.raylib.window as window_module
+from plyunit.backends.integrations.raylib.window import Window
 from plyunit.utils.io import read_json, write_json
 
 

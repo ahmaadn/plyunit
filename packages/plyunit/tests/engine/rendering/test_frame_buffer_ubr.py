@@ -13,6 +13,7 @@ from plyunit.rendering.frame_buffer import (
 )
 
 from plyunit._constants import MAX_SPRITES
+from rendering_fakes import TextureIdAdapter, make_texture
 
 
 def test_max_sprites_default():
@@ -68,7 +69,7 @@ def test_renderer_requires_ubr():
 
     from plyunit.rendering.renderer import Renderer
 
-    with pytest.raises(RuntimeError, match="UBR wajib"):
+    with pytest.raises(RuntimeError, match="requires an IUnifiedBufferBatch"):
         Renderer(canvas=SimpleNamespace())
 
 
@@ -77,7 +78,7 @@ def test_renderer_submit_and_flush_calls_submit_frame():
 
     from plyunit.rendering.renderer import Renderer
 
-    class FakeUbr:
+    class FakeUbr(TextureIdAdapter):
         capacity = 64
         calls = 0
 
@@ -100,7 +101,7 @@ def test_renderer_submit_and_flush_calls_submit_frame():
         if p:
             p.enabled = False
     r.reset_frame()
-    tex = SimpleNamespace(id=42, width=8, height=8)
+    tex = make_texture(42, 8, 8)
     r.render_sprite(texture=tex, pos=(1.0, 2.0))
     r.render_batch(texture=tex, positions=[(0.0, 0.0), (1.0, 1.0)])
     assert r._frame_buffer.count == 3
@@ -114,7 +115,7 @@ def test_renderer_defers_gpu_initialization_until_requested():
 
     from plyunit.rendering.renderer import Renderer
 
-    class FakeUbr:
+    class FakeUbr(TextureIdAdapter):
         def __init__(self):
             self.init_calls = 0
 
@@ -140,7 +141,7 @@ def test_submit_tile_writes_frame_buffer_soa():
 
     from plyunit.rendering.renderer import Renderer
 
-    class FakeUbr:
+    class FakeUbr(TextureIdAdapter):
         capacity = 64
 
         def init(self, n):
@@ -154,7 +155,7 @@ def test_submit_tile_writes_frame_buffer_soa():
 
     r = Renderer(canvas=SimpleNamespace(), ubr=FakeUbr(), max_sprites=64)
     r.reset_frame()
-    tex = SimpleNamespace(id=7, width=32, height=32)
+    tex = make_texture(7, 32, 32)
     r.render_sprite(
         texture=tex,
         dest=(10.0, 20.0, 16.0, 16.0),
@@ -188,10 +189,10 @@ def test_submit_text_shaped_writes_frame_buffer():
     """Shaped text glyphs land in FrameBuffer like sprites (UBR)."""
     from types import SimpleNamespace
 
-    from plyunit.assets.types import ShapedText
+    from plyunit.backends.ports.text import ShapedText
     from plyunit.rendering.renderer import Renderer
 
-    class FakeUbr:
+    class FakeUbr(TextureIdAdapter):
         capacity = 64
 
         def init(self, n):
@@ -211,7 +212,7 @@ def test_submit_text_shaped_writes_frame_buffer():
         uv_rects=np.array(
             [[0.0, 0.0, 0.25, 0.375], [0.25, 0.0, 0.5, 0.375]], dtype=np.float32
         ),
-        tex_id=11,
+        texture=make_texture(11, 32, 32),
         total_width=16.0,
         total_height=16.0,
     )
@@ -232,7 +233,7 @@ def test_submit_text_shaped_writes_frame_buffer():
         offsets_xy=np.empty((0, 2), np.float32),
         sizes_wh=np.empty((0, 2), np.float32),
         uv_rects=np.empty((0, 4), np.float32),
-        tex_id=11,
+        texture=make_texture(11, 32, 32),
         total_width=0.0,
         total_height=16.0,
     )

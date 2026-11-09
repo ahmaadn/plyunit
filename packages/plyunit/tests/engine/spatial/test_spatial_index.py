@@ -8,7 +8,7 @@ import pytest
 from plyunit.core.units.node_unit import NodeUnit
 from plyunit.core.units.scene_unit import SceneUnit
 from plyunit.core.units.unit_registry import UnitRegistry
-from plyunit.services.spatial.spatial_index import SpatialIndex
+from packages.plyunit.src.plyunit.services.spatial_index import SpatialIndex
 
 
 @pytest.fixture(autouse=True)

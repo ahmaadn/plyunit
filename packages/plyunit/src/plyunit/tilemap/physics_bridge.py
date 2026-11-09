@@ -1,22 +1,14 @@
-"""TileMapPhysicsBridge — adapter from baked tilemap data to Physics.
+"""Convert baked tilemap collision data through the configured physics service.
 
-Converts :class:`BakedStaticBody` (a baker-produced TypedDict) into
-:class:`~plyunit.backends.physics.pymunk.StaticBody` (pymunk-backed) and
-registers it with :class:`~plyunit.backends.physics.pymunk.Physics` in
-batches per chunk. Also installs the one-way platform handler.
-
-Coordinate conventions:
-- ``BakedStaticBody["world_pos"]`` = the body's top-left corner (tile top-left).
-- Shape offsets/vertices in baked data are expressed relative to that
-  top-left corner. Since ``BoxShape``/``CircleShape`` in the physics
-  integration interpret ``offset`` as the shape center relative to the
-  body, the bridge shifts box offsets so the center is correct.
+Box offsets describe top-left corners in baked data, so conversion shifts them
+by half the box size to match the portable engine shape's center convention.
+Native collision callbacks belong to the selected physics backend.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from plyunit.core.components.physics import (
     BoxShape,
@@ -28,25 +20,7 @@ from plyunit.core.components.physics import (
 
 from .map_data import BakedStaticBody, PhysicsShape as BakedShape
 
-if TYPE_CHECKING:
-    import pymunk
-
 logger = logging.getLogger(__name__)
-
-
-def _is_static_body(obj: object) -> bool:
-    """Duck-typed detection of ``StaticBody`` without importing the engine integration.
-
-    Relies on ``type(obj).__name__`` so this module stays pure with no
-    runtime dependency on :mod:`plyunit.backends.integrations`.
-
-    Args:
-        obj: Candidate object to check.
-
-    Returns:
-        bool: ``True`` if ``obj`` is a ``StaticBody`` with ``user_data``.
-    """
-    return type(obj).__name__ == "StaticBody" and hasattr(obj, "user_data")
 
 
 class TileMapPhysicsBridge:
@@ -56,7 +30,7 @@ class TileMapPhysicsBridge:
     (on_ready) and streaming (ChunkTile load/unload per chunk).
 
     ``physics`` must expose:
-    - ``add_static_batch`` / ``remove_static`` / ``add_pre_solve_handler``
+    - ``add_static_batch`` / ``remove_static`` / ``install_one_way_handler``
     - ``create_static_body(...)`` factory (wired by the physics integration)
     """
 
@@ -118,52 +92,8 @@ class TileMapPhysicsBridge:
         """
         if self._one_way_installed:
             return
-        self._physics.add_pre_solve_handler(self._one_way_pre_solve)
+        self._physics.install_one_way_handler()
         self._one_way_installed = True
-
-    def _one_way_pre_solve(
-        self,
-        arbiter: pymunk.Arbiter,
-        space: pymunk.Space,
-        data: Any,
-    ) -> None:
-        """Filters collisions for one-way platforms at first contact.
-
-        Disables the collision response unless the actor touches the
-        platform from above (following the contact normal; the world is
-        y-down). An actor can jump through the platform from below and
-        only collides when landing from above.
-
-        Args:
-            arbiter: The pymunk arbiter currently being pre-solved.
-            space: The pymunk space the arbiter belongs to.
-            data: Extra handler data (unused).
-        """
-        shape_a, shape_b = arbiter.shapes
-        a_data = getattr(shape_a.body, "data", None)
-        b_data = getattr(shape_b.body, "data", None)
-
-        static: Any | None = None
-        static_is_a = False
-        if _is_static_body(a_data):
-            static, static_is_a = a_data, True
-        elif _is_static_body(b_data):
-            static, static_is_a = b_data, False
-        if static is None:
-            return
-
-        ud = static.user_data
-        if not isinstance(ud, dict) or not ud.get("is_one_way"):
-            return
-
-        nx, ny = arbiter.normal
-        if not static_is_a:
-            nx, ny = -nx, -ny  # point the normal from platform → actor
-
-        # World is y-down: "up" = -y. Only process when the normal clearly
-        # points up (actor above the platform). Side/below → ignored.
-        if ny > -0.5:
-            arbiter.process_collision = False
 
     # ------------------------------------------------------------------
     # Conversion
@@ -197,8 +127,8 @@ class TileMapPhysicsBridge:
         elasticity: float,
     ) -> PhysicsShape:
         """Converts one baked shape dict into a :class:`PhysicsShape`."""
-        kind = shape.get("kind", "box")
-        if kind == "box":
+        kind = shape["kind"]
+        if shape["kind"] == "box":
             ox, oy = shape.get("offset", (0.0, 0.0))
             sw, sh = shape.get("size", (0.0, 0.0))
             # baked offset = box top-left relative to the tile; BoxShape uses
@@ -210,7 +140,7 @@ class TileMapPhysicsBridge:
                 friction=friction,
                 elasticity=elasticity,
             )
-        if kind == "circle":
+        if shape["kind"] == "circle":
             ox, oy = shape.get("offset", (0.0, 0.0))
             return CircleShape(
                 radius=shape.get("radius", 0.0),
@@ -218,7 +148,7 @@ class TileMapPhysicsBridge:
                 friction=friction,
                 elasticity=elasticity,
             )
-        if kind == "polygon":
+        if shape["kind"] == "polygon":
             verts = shape.get("vertices", [])
             return PolygonShape(
                 vertices=[(float(v[0]), float(v[1])) for v in verts],

@@ -1,24 +1,15 @@
-"""Example: Texture Atlas (opsional, in-memory)
+"""Demonstrate an optional in-memory texture atlas with animated sprites.
 
-Demonstrasi :meth:`Assets.build_texture_atlas` — menggabungkan semua aset
-yang sudah dimuat menjadi satu texture atlas di memori, tanpa menulis apa
-pun ke disk. Cukup satu baris di ``App.on_load``:
-
-    self.one("@Assets").build_texture_atlas()
-
-Fitur ini opsional: hapus baris tersebut dan game tetap berjalan persis
-sama — ID aset tidak berubah, hanya tekstur di belakangnya yang
-digabung. Manfaatnya terlihat pada statistik overlay: sprite yang berbagi
-satu texture di-batch renderer menjadi satu draw call.
-
-Aset tile (region spritesheet) dan player (frame animasi) ikut tergabung
-ke atlas yang sama dengan aset standalone.
+Load resources once, then pack their pixels through ``Assets.build_texture_atlas``.
+Logical asset IDs remain unchanged; resolve their handles again after packing.
+No image files are written, and sprites sharing an atlas can share native runs.
 """
 
 import random
 from pathlib import Path
 
 import plyunit as pu
+from examples.test_assets.load_assets import load_tiles
 
 SPRITE_COUNT = 100
 TILE_KEYS = [
@@ -27,9 +18,9 @@ TILE_KEYS = [
     "dirt_path_rect_3",
     "dirt_path_rect_5",
     "dirt_path_rect_7",
-    "dirt_path_rect_9",
-    "dirt_path_rect_11",
-    "dirt_path_rect_13",
+    "dirt_path_rect_2",
+    "dirt_path_rect_4",
+    "dirt_path_rect_6",
 ]
 PLAYER_KEYS = [f"player:run_{i}" for i in range(4)]
 ALL_KEYS = TILE_KEYS + PLAYER_KEYS
@@ -87,7 +78,7 @@ class AtlasApp(pu.App):
         data_dir = Path(__file__).parent / "test_assets" / "data"
         assets = self.one("@Assets")
         assets.set_assets_path(data_dir)
-        assets.load_spritesheet("tile/tiles.json")
+        load_tiles(assets)
         assets.load_folder("player/run")
 
         # --- Opsional: gabungkan semua aset di atas menjadi satu atlas ---

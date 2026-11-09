@@ -77,8 +77,6 @@ def test_scene_unit_update_render_profile():
         def update(self, dt):
             pass
 
-        def render_submit(self, renderer):
-            pass
 
     s = S()
     # inject fake camera for cull

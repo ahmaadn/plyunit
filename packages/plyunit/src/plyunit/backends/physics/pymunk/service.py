@@ -171,8 +171,7 @@ class Physics(ServiceUnit):
     Args:
         backend: A ``PhysicsBackend`` instance (pymunk Space wrapper)
             injected via DI. When ``None``, a default backend is built
-            from the following kwargs (legacy path; prefer
-            :func:`build_physics_service`).
+            from the following keyword arguments.
         gravity: World gravity (gx, gy). Default ``(0, 0)``.
         world_bounds: World bounds for the QuadTree (min_x, min_y, max_x, max_y).
         spatial_hash_dim: pymunk spatial hash cell dimension.
@@ -295,6 +294,42 @@ class Physics(ServiceUnit):
         """
         self._pre_solve_handlers.append(handler)
 
+    def install_one_way_handler(self) -> None:
+        """Install the backend collision filter for one-way platform metadata.
+
+        All tilemap bridges share this service-owned callback, so unloading or
+        recreating a tilemap does not accumulate bound bridge methods.
+        """
+        handler = self._one_way_pre_solve
+        if handler not in self._pre_solve_handlers:
+            self.add_pre_solve_handler(handler)
+
+    @staticmethod
+    def _one_way_pre_solve(
+        arbiter: pymunk.Arbiter, space: pymunk.Space, data: Any
+    ) -> None:
+        """Allow contact only above a one-way platform in a Y-down world.
+
+        Args:
+            arbiter: Native contact whose normal points from shape A to B.
+            space: Native simulation space; unused.
+            data: Callback data; unused.
+        """
+        shape_a, shape_b = arbiter.shapes
+        a_data = getattr(shape_a.body, "data", None)
+        b_data = getattr(shape_b.body, "data", None)
+        if isinstance(a_data, StaticBody):
+            static, direction = a_data, 1.0
+        elif isinstance(b_data, StaticBody):
+            static, direction = b_data, -1.0
+        else:
+            return
+        metadata = static.user_data
+        if isinstance(metadata, dict) and metadata.get("is_one_way"):
+            _, normal_y = arbiter.normal
+            if normal_y * direction > -0.5:
+                arbiter.process_collision = False
+
     def _on_pre_solve(
         self,
         arbiter: pymunk.Arbiter,
@@ -393,7 +428,8 @@ class Physics(ServiceUnit):
         arbiter: pymunk.Arbiter,
     ) -> None:
         """Dispatch a collision-enter event to the owners' ``on_collision_enter``."""
-        key = tuple(sorted((self._event_key_part(a), self._event_key_part(b))))
+        lo, hi = sorted((self._event_key_part(a), self._event_key_part(b)))
+        key = (lo, hi)
         a = self._event_target(a)
         b = self._event_target(b)
 
@@ -439,7 +475,8 @@ class Physics(ServiceUnit):
         self, a: PhysicsBody | StaticBody, b: PhysicsBody | StaticBody
     ) -> None:
         """Dispatch a collision-exit event to the owning ``PhysicsBody``."""
-        key = tuple(sorted((self._event_key_part(a), self._event_key_part(b))))
+        lo, hi = sorted((self._event_key_part(a), self._event_key_part(b)))
+        key = (lo, hi)
         a = self._event_target(a)
         b = self._event_target(b)
 
@@ -463,7 +500,8 @@ class Physics(ServiceUnit):
         b: PhysicsBody | PhysicsArea | StaticBody,
     ) -> None:
         """Dispatch a (sensor) overlap-enter event to the ``PhysicsArea``."""
-        key = tuple(sorted((self._event_key_part(a), self._event_key_part(b))))
+        lo, hi = sorted((self._event_key_part(a), self._event_key_part(b)))
+        key = (lo, hi)
         a = self._event_target(a)
         b = self._event_target(b)
 
@@ -487,7 +525,8 @@ class Physics(ServiceUnit):
         b: PhysicsBody | PhysicsArea | StaticBody,
     ) -> None:
         """Dispatch a (sensor) overlap-exit event to the ``PhysicsArea``."""
-        key = tuple(sorted((self._event_key_part(a), self._event_key_part(b))))
+        lo, hi = sorted((self._event_key_part(a), self._event_key_part(b)))
+        key = (lo, hi)
         a = self._event_target(a)
         b = self._event_target(b)
 

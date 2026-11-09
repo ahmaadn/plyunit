@@ -9,5 +9,12 @@
     "mipmap": false,
     "premultiply_alpha": false
   },
-  "regions": {}
+  "regions": {
+    "background 2_18_10": [
+      288.0,
+      160.0,
+      16.0,
+      16.0
+    ]
+  }
 }

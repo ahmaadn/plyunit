@@ -1,160 +1,132 @@
-"""Assets.store_texture / store_textures: simpan texture eksternal + atlas."""
+"""Texture ownership, replacement, and bulk storage through dedicated handles."""
 
 from __future__ import annotations
 
+from dataclasses import replace
+from types import SimpleNamespace
+
 import pytest
 
-import plyunit.assets.assets as assets_module
-from plyunit.assets.types import TextureProperty
+from asset_fakes import FakeGPU
+from plyunit.backends.integrations.raylib.assets import Assets
+from plyunit.backends.integrations.raylib.handler import RenderTexture
 
 
-class FakeTexture:
-    def __init__(self, name: str, width: int, height: int) -> None:
-        self.name = name
-        self.width = width
-        self.height = height
-        self.id = abs(hash(name)) % 100000
-
-
-class StoreDummyLoader:
-    def __init__(self) -> None:
-        self.default = TextureProperty(
-            filter="nearest",
-            wrap="clamp",
-            mipmap=False,
-            srgb=True,
-            premultiply_alpha=False,
-            color_key=(0, 0, 0, 255),
-        )
-        self.unloaded_textures: list[str] = []
-
-    def unload_texture(self, texture):
-        self.unloaded_textures.append(texture.name)
-
-
-class AtlasComposeLoader(StoreDummyLoader):
-    """Dummy loader that supports full atlas-page composition."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._page_counter = 0
-
-    def gen_image_color(self, width, height, color=(0, 0, 0, 0)):
-        return FakeTexture(f"page:{width}x{height}", width, height)
-
-    def load_image_from_texture(self, texture):
-        return FakeTexture(texture.name, texture.width, texture.height)
-
-    def image_draw(self, dst, src, pos):
-        pass
-
-    def unload_image(self, image):
-        pass
-
-    def load_texture_from_image(self, image):
-        self._page_counter += 1
-        return FakeTexture(
-            f"atlas_page_{self._page_counter}", image.width, image.height
-        )
-
-    def set_texture_filter(self, texture, filter_mode):
-        pass
-
-    def set_texture_wrap(self, texture, wrap_mode):
-        pass
-
-
-def make_assets() -> assets_module.Assets:
-    # pyrefly: ignore [bad-argument-type]
-    return assets_module.Assets(loader=StoreDummyLoader())
-
-
-def test_store_texture_registers_root_asset() -> None:
-    manager = make_assets()
-    texture = FakeTexture("rect_a", 32, 16)
-
+def test_store_texture_registers_root_asset(manager: Assets, gpu: FakeGPU) -> None:
+    texture = gpu.texture("rect_a", 32, 16)
     manager.store_texture("rect_a", texture)
+    handle = manager.get_asset("rect_a")
+    assert handle is not texture
+    assert handle.raw_texture is texture.raw_texture
+    assert handle.texture_id == handle.parent_id == "rect_a"
+    assert handle.source_rect == (0.0, 0.0, 32.0, 16.0)
+    assert manager["rect_a"] is handle
+    assert texture.texture_id == ""
 
-    data = manager.get_texture_data("rect_a")
-    assert data.texture is texture
-    assert data.parent_id == "rect_a"
-    assert data.source_rect == (0.0, 0.0, 32.0, 16.0)
-    assert manager.get_asset("rect_a") is texture
 
-
-def test_store_texture_rejects_none() -> None:
-    manager = make_assets()
-
-    with pytest.raises(ValueError, match="tidak boleh None"):
+def test_store_texture_rejects_none(manager: Assets) -> None:
+    with pytest.raises(ValueError, match="must not be None"):
         manager.store_texture("bad", None)
 
 
-def test_store_texture_overwrites_existing_id() -> None:
-    manager = make_assets()
-    old = FakeTexture("old", 8, 8)
-    new = FakeTexture("new", 16, 16)
+def test_store_texture_rejects_raw_struct(manager: Assets, gpu: FakeGPU) -> None:
+    raw = gpu.texture("raw", 8, 8).raw_texture
+    with pytest.raises(TypeError, match="Texture2D handle"):
+        manager.store_texture("raw", raw)
 
+
+def test_store_texture_overwrites_existing_id(manager: Assets, gpu: FakeGPU) -> None:
+    old = gpu.texture("old", 8, 8)
+    new = gpu.texture("new", 16, 16)
     manager.store_texture("shared", old)
     manager.store_texture("shared", new)
-
-    assert manager.get_asset("shared") is new
-    # The old root is unloaded from the GPU when overwritten.
-    assert manager._loader.unloaded_textures == ["old"]
+    assert manager.get_asset("shared").raw_texture is new.raw_texture
+    assert gpu.unloaded == [old.raw_texture]
 
 
-def test_store_textures_bulk() -> None:
-    manager = make_assets()
-    textures = {
-        "rect_1": FakeTexture("r1", 4, 4),
-        "rect_2": FakeTexture("r2", 8, 2),
-        "circle_1": FakeTexture("c1", 6, 6),
-    }
+def test_store_same_texture_is_idempotent(manager: Assets, gpu: FakeGPU) -> None:
+    manager.store_texture("shared", gpu.texture("shared", 8, 8))
+    first = manager["shared"]
+    wrapped_again = replace(first, raw_texture=replace(first.raw_texture))
+    manager.store_texture("shared", wrapped_again)
+    assert manager.is_valid("shared")
+    assert gpu.unloaded == []
+    manager.clear_all()
+    assert len(gpu.unloaded) == 1
 
+
+def test_same_gpu_resource_cannot_have_two_owners(
+    manager: Assets, gpu: FakeGPU
+) -> None:
+    texture = gpu.texture("shared", 8, 8)
+    manager.store_texture("first", texture)
+    with pytest.raises(ValueError, match="already owned"):
+        manager.store_texture(
+            "second", replace(texture, raw_texture=replace(texture.raw_texture))
+        )
+    assert set(manager.all_assets) == {"first"}
+    assert gpu.unloaded == []
+
+
+def test_regions_cannot_transfer_parent_ownership(
+    manager: Assets, gpu: FakeGPU
+) -> None:
+    manager.store_texture("sheet", gpu.texture("sheet", 16, 16))
+    region = manager["sheet"].derive(
+        texture_id="tile", parent_id="sheet", source_rect=(0.0, 0.0, 8.0, 8.0)
+    )
+    with pytest.raises(ValueError, match="borrowed"):
+        manager.store_texture("tile", region)
+    assert manager.is_valid("sheet")
+    assert gpu.unloaded == []
+    promoted = region.derive(
+        texture_id="promoted", parent_id="promoted", source_rect=region.source_rect
+    )
+    with pytest.raises(ValueError, match="borrowed"):
+        manager.store_texture("promoted", promoted)
+
+
+def test_render_target_attachment_is_borrowed(manager: Assets, gpu: FakeGPU) -> None:
+    raw = gpu.texture("attachment", 8, 8).raw_texture
+    target = RenderTexture(SimpleNamespace(texture=raw))
+    with pytest.raises(ValueError, match="borrowed"):
+        manager.store_texture("attachment", target.texture)
+    assert not raw.unloaded
+
+
+def test_store_textures_bulk(manager: Assets, gpu: FakeGPU) -> None:
+    textures = {name: gpu.texture(name, 4, 4) for name in ("r1", "r2", "c1")}
     manager.store_textures(textures)
-
     for asset_id, texture in textures.items():
-        assert manager.get_asset(asset_id) is texture
+        assert manager[asset_id].raw_texture is texture.raw_texture
 
 
-def test_store_textures_rejects_none_entry() -> None:
-    manager = make_assets()
-
-    with pytest.raises(ValueError, match="rect_1"):
-        manager.store_textures({"rect_1": None})
-
-
-def test_stored_textures_are_atlas_packable() -> None:
-    """Texture buatan canvas.create_* (root mandiri) layak di-pack atlas."""
-    manager = make_assets()
-    manager.store_texture("rect_a", FakeTexture("rect_a", 32, 16))
-    manager.store_texture("rect_b", FakeTexture("rect_b", 16, 16))
-
-    roots = manager._collect_atlas_roots(["rect_a", "rect_b"])
-
-    assert roots == ["rect_a", "rect_b"]
+def test_store_textures_rejects_none_before_mutation(
+    manager: Assets, gpu: FakeGPU
+) -> None:
+    with pytest.raises(ValueError, match="bad"):
+        manager.store_textures({"good": gpu.texture("good", 4, 4), "bad": None})
+    assert manager.all_assets == {}
 
 
-def test_build_texture_atlas_packs_stored_textures() -> None:
-    """Siklus penuh: store_texture -> build_texture_atlas -> get_asset."""
-    loader = AtlasComposeLoader()
-    # pyrefly: ignore [bad-argument-type]
-    manager = assets_module.Assets(loader=loader)
-    rect_a = FakeTexture("rect_a", 32, 16)
-    rect_b = FakeTexture("rect_b", 16, 16)
-    manager.store_texture("rect_a", rect_a)
-    manager.store_texture("rect_b", rect_b)
+def test_store_invalid_texture_preserves_old(manager: Assets, gpu: FakeGPU) -> None:
+    manager.store_texture("asset", gpu.texture("old", 8, 8))
+    old = manager["asset"]
+    invalid = gpu.texture("invalid", 0, 0)
+    invalid.raw_texture.valid = False
+    with pytest.raises(ValueError, match="invalid"):
+        manager.store_texture("asset", invalid)
+    assert manager["asset"] is old
+    assert gpu.unloaded == []
 
-    page_ids = manager.build_texture_atlas(["rect_a", "rect_b"])
 
-    assert len(page_ids) == 1
-    page = manager.get_asset(page_ids[0])
-    # Both old IDs now point to the same atlas page.
-    assert manager.get_asset("rect_a") is page
-    assert manager.get_asset("rect_b") is page
-    # The old textures are unloaded from the GPU after being moved into the atlas.
-    assert loader.unloaded_textures == ["rect_a", "rect_b"]
-    # Atlas source rects are valid (inside the page).
-    rect = manager.get_source_rect("rect_a")
-    assert rect is not None
-    assert rect[0] >= 0.0 and rect[0] + rect[2] <= float(page.width)
-    assert rect[1] >= 0.0 and rect[1] + rect[3] <= float(page.height)
+def test_stored_textures_are_atlas_packable(manager: Assets, gpu: FakeGPU) -> None:
+    manager.store_texture("rect_a", gpu.texture("rect_a", 32, 16))
+    manager.store_texture("rect_b", gpu.texture("rect_b", 16, 16))
+    assert manager._collect_atlas_roots(["rect_a", "rect_b"]) == ["rect_a", "rect_b"]
+    pages = manager.build_texture_atlas()
+    assert pages == ["atlas"]
+    page = manager["atlas"]
+    assert manager["rect_a"].raw_texture is page.raw_texture
+    assert manager["rect_b"].raw_texture is page.raw_texture
+    assert [raw.name for raw in gpu.unloaded] == ["rect_a", "rect_b"]

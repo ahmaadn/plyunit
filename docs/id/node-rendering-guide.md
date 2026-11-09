@@ -20,11 +20,21 @@ Fokus utamanya adalah menjaga kode tetap mudah dipakai tanpa menghilangkan perfo
 | --- | --- | --- |
 | Satu sprite per node | `SpriteRenderer` | Jalur umum dan otomatis dioptimalkan. |
 | Banyak sprite dengan texture/state sama | `renderer.render_batch()` | Cocok untuk particle, tile sederhana, crowd, atau spam sprite. |
-| Bentuk primitive seperti rectangle/circle/line | `renderer.render_rect()`, `render_circle()`, `render_line()` | Gunakan di `render_submit()`, bukan `draw()`, jika bisa. |
+| Reusable rectangles/circles/lines | `canvas.create_*` + `Assets.store_texture` + `render_sprite` | Bake once after bootstrap, then use the native sprite path. |
+| Dynamic/debug geometry | `render_custom(draw_func=lambda canvas: canvas.draw_*())` | Draw geometry during the queued flush; no primitive-submit compatibility APIs. |
 | Gambar langsung ke Canvas | `draw(canvas)` + `enable_custom_draw()` | Untuk kasus khusus saja. |
 | UI sprite/text | typed `render_*` dengan `Layer.UI`, serta `Text.push()` | Screen-space UI melalui layer UI. |
 
 ### 1.2 Hindari Pola Mahal
+
+`NodeUnit` and components submit through `render_submit(renderer, context)`.
+`SceneUnit` has no `render_submit` hook: attach a renderer node to `scene.root`
+or submit app-level work in `App.update(dt)` before `flush_all`. `NodeUnit.update`
+is fixed-step work, while `App.update` runs once per render frame.
+
+Textures are `Texture2DHandle` objects from Assets or Canvas creation, not
+raw raylib structs. `Canvas2D()` is a factory returning the module-backed
+`ICanvas2D`; annotate Canvas callbacks with the port, not `pu.Canvas`.
 
 - Jangan override `draw()` untuk node yang hanya menampilkan sprite; gunakan `SpriteRenderer`.
 - Jangan membuat ratusan node dengan `draw()` kosong; default `NodeUnit` tidak lagi submit custom draw.
@@ -120,7 +130,8 @@ scene.root.attach(node)
 - `scale`;
 - `layer` dan `z_index`;
 - `tint`;
-- `use_interpolation`.
+- `asset_key` keeps resolution lazy per frame, so atlas repacking is safe;
+- direct `texture` handles must be resolved again after reload or atlas packing.
 
 ## 5. Menggambar Satu Sprite Secara Manual
 
@@ -144,6 +155,11 @@ class SingleSpriteNode(pu.NodeUnit):
             tint=(255, 255, 255, 255),
         )
 ```
+
+For manual submits, forward `context.pass_name`, `state_id`, `layer`, `z`,
+`screen_space`, and y-sort fields to the renderer when provided. Otherwise
+inherited scissor/blend/shader state can be lost. Components already receive
+this resolved context. See [rendering/queued-submit.md](rendering/queued-submit.md#one-sprite).
 
 Gunakan pola ini jika:
 
@@ -217,45 +233,76 @@ class ManyCoins(pu.NodeUnit):
 `draw(canvas)` adalah escape hatch. Default `NodeUnit` tidak submit draw kosong. Jika ingin memakai `draw()`, aktifkan custom draw atau override `draw()` pada class.
 
 ```python
+from plyunit.backends.ports.renderer import ICanvas2D
+
+
 class HealthBar(pu.NodeUnit):
     def __init__(self) -> None:
         super().__init__(name="HealthBar")
+        self.layer = pu.Layer.UI
         self.enable_custom_draw()
         self.hp_ratio = 1.0
 
-    def draw(self, canvas: pu.Canvas) -> None:
-        canvas.draw_rect(
+    def draw(self, canvas: ICanvas2D) -> None:
+        canvas.draw_rectangle(
             rect=(20.0, 20.0, 200.0, 16.0),
             color=(40, 40, 40, 255),
         )
-        canvas.draw_rect(
+        canvas.draw_rectangle(
             rect=(20.0, 20.0, 200.0 * self.hp_ratio, 16.0),
             color=(220, 50, 50, 255),
         )
 ```
 
-Namun untuk shape sederhana, lebih baik submit primitive di `render_submit()`.
+For a reusable rectangular bar, cache a white unit texture once and vary the
+sprite destination and tint. `Assets` owns the standalone baked texture;
+the node resolves its handle by logical asset ID each frame:
 
 ```python
 class HealthBarFast(pu.NodeUnit):
     def __init__(self) -> None:
         super().__init__(name="HealthBarFast")
+        self.layer = pu.Layer.UI
         self.hp_ratio = 1.0
 
+    def on_ready(self) -> None:
+        self.assets = self.one("@Assets", scope="global")
+        renderer = self.one("@Renderer", scope="global")
+        if not self.assets.is_valid("health_bar_unit"):
+            self.assets.store_texture(
+                "health_bar_unit",
+                renderer.canvas.create_rect(rect=(0, 0, 1, 1), color=(255, 255, 255, 255)),
+            )
+
     def render_submit(self, renderer: pu.Renderer, context: pu.RenderContext | None = None) -> None:
-        renderer.render_rect(
-            rect=(20.0, 20.0, 200.0, 16.0),
-            color=(40, 40, 40, 255),
-            layer=pu.Layer.UI,
+        state = {
+            "layer": context.layer if context is not None else self.layer,
+            "z": context.z if context is not None else self.z_index,
+            "pass_name": context.pass_name if context is not None else None,
+            "state_id": context.state_id if context is not None else None,
+            "screen_space": context.screen_space if context is not None else True,
+        }
+        texture = self.assets["health_bar_unit"]
+        renderer.render_sprite(
+            texture=texture,
+            dest=(20.0, 20.0, 200.0, 16.0),
+            tint=(40, 40, 40, 255),
+            **state,
         )
-        renderer.render_rect(
-            rect=(20.0, 20.0, 200.0 * self.hp_ratio, 16.0),
-            color=(220, 50, 50, 255),
-            layer=pu.Layer.UI,
-        )
+        width = 200.0 * max(0.0, min(1.0, self.hp_ratio))
+        if width > 0.0:
+            renderer.render_sprite(
+                texture=texture,
+                dest=(20.0, 20.0, width, 16.0),
+                tint=(220, 50, 50, 255),
+                **state,
+            )
 ```
 
-Pilih `render_submit()` untuk renderer typed karena engine masih bisa mengurutkan, mengelompokkan state, dan melakukan batching.
+For outlines that cannot be expressed with a cached sprite, submit
+`render_custom(draw_func=lambda canvas: canvas.draw_rectangle(...),
+layer=pu.Layer.UI)` from `render_submit`. Both custom paths run during flush,
+not during fixed simulation. Custom geometry does not enter sprite batches.
 
 ## 9. Layer dan Z-Index
 
@@ -374,6 +421,8 @@ Sebelum membuat banyak node atau banyak draw call, cek hal berikut:
 
 - Untuk satu sprite node: `NodeUnit + SpriteRenderer`.
 - Untuk banyak sprite data-oriented: satu node/system + `render_batch()`.
-- Untuk shape/text/UI: typed renderer (`render_rect`, `Text.push`, `render_*` + `Layer.UI`).
+- Reusable shapes/UI: cached `canvas.create_*` textures + sprite submits with `Layer.UI` for screen space.
+- Text: `Text.push(..., layer=pu.Layer.UI)` / `Renderer.render_shaped_text`.
+- Dynamic/debug geometry: `render_custom` or the queued node `draw(canvas)` path.
 - Untuk Canvas langsung: `draw(canvas)` hanya jika tidak ada typed renderer yang cocok.
 - Untuk batch besar: `render_batch` + material shared; flush UBR group by `tex_id`.

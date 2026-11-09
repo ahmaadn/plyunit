@@ -12,6 +12,7 @@ import pyray as pr
 
 import plyunit as pu
 from benchmarks.report_paths import resolve_report_path, write_text_report
+from plyunit.backends.ports.handler import Texture2DHandle
 from plyunit.rendering import Layer
 
 PROFILE_PASS_RATIO = {
@@ -160,6 +161,9 @@ class BenchmarkResult:
 class ShapesBenchmarkScene(pu.SceneUnit):
     def __init__(self, app: pu.App, config: BenchmarkConfig) -> None:
         super().__init__(name="shapes-benchmark-scene")
+        from benchmarks.benchmark_root import BenchmarkRoot
+
+        self.root = BenchmarkRoot(self._submit_frame)
         self.app = app
         self.config = config
 
@@ -169,9 +173,9 @@ class ShapesBenchmarkScene(pu.SceneUnit):
         self.size_wh = np.empty((0, 2), dtype=np.float32)
         self.rgba = np.empty((0, 4), dtype=np.uint8)
         self.shape_kind = np.empty((0,), dtype=np.int8)
-        self._shape_textures: list[object] = []
+        self._shape_textures: list[Texture2DHandle] = []
         self._shape_sources: list[tuple[float, float, float, float]] | None = None
-        self._entity_textures: list[object] = []
+        self._entity_textures: list[Texture2DHandle] = []
         self._entity_sources: list[tuple[float, float, float, float]] | None = None
         self._render_scales = np.empty((0,), dtype=np.float32)
         self._render_origins = np.empty((0, 2), dtype=np.float32)
@@ -226,7 +230,7 @@ class ShapesBenchmarkScene(pu.SceneUnit):
 
     def _prepare_shape_textures(self) -> None:
         """Bake reusable white shapes and optionally pack them into an atlas."""
-        canvas = self.one("@Renderer").canvas
+        canvas = self.app.canvas
         assets = self.one("@Assets")
         white = (255, 255, 255, 255)
         textures = {
@@ -246,9 +250,9 @@ class ShapesBenchmarkScene(pu.SceneUnit):
         self._shape_textures = []
         sources: list[tuple[float, float, float, float]] = []
         for asset_id in textures:
-            data = assets.get_texture_data(asset_id)
-            self._shape_textures.append(data.texture)
-            sources.append(data.source_rect)
+            texture = assets.get_asset(asset_id)
+            self._shape_textures.append(texture)
+            sources.append(texture.source_rect)
         self._shape_sources = sources if self.config.use_atlas else None
 
     def _rebuild_render_arrays(self) -> None:
@@ -304,7 +308,7 @@ class ShapesBenchmarkScene(pu.SceneUnit):
         if self.entity_count > self._peak_entities:
             self._peak_entities = self.entity_count
 
-    def render_submit(self, renderer) -> None:
+    def _submit_frame(self, renderer) -> None:
         now = time.perf_counter()
         if self._last_frame_time is not None:
             frame_dt = max(_EPSILON, now - self._last_frame_time)
@@ -579,7 +583,7 @@ class ShapesBenchmarkApp(pu.App):
         _ = dt
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((245, 245, 245, 255))
+        self.window.clear_background(self.benchmark_config.background_color)
         self.scene_manager.render(self.renderer)
         self.renderer.flush_all()
         self.window.end_drawing()
@@ -784,7 +788,6 @@ def main() -> int:
             fixed_update_hz=config.fixed_update_hz,
             max_frame_delta_time=config.max_frame_delta_time,
             max_substeps_per_frame=config.max_substeps_per_frame,
-            background_color=config.background_color,
         ),
     )
     start = time.perf_counter()

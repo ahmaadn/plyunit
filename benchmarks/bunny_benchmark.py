@@ -6,6 +6,7 @@ import math
 import random
 import time
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pyray as pr
@@ -13,6 +14,9 @@ import pyray as pr
 import plyunit as pu
 from benchmarks.report_paths import resolve_report_path, write_text_report
 from plyunit.rendering import Layer
+
+if TYPE_CHECKING:
+    from plyunit.backends.integrations.raylib.handler import Texture2D
 
 PROFILE_PASS_RATIO = {
     "strict": 0.95,
@@ -148,16 +152,17 @@ class BenchmarkResult:
 class BunnyBenchmarkScene(pu.SceneUnit):
     def __init__(self, app: pu.App, config: BenchmarkConfig) -> None:
         super().__init__(name="bunny-benchmark-scene")
+        from benchmarks.benchmark_root import BenchmarkRoot
+
+        self.root = BenchmarkRoot(self._submit_frame)
         self.app = app
         self.config = config
 
         # Contiguous float32 SoA — sim + draw share the same buffers (zero-copy pack).
         self.pos_xy = np.empty((0, 2), dtype=np.float32)
         self.vel_xy = np.empty((0, 2), dtype=np.float32)
-        # Legacy aliases kept for any external tooling that inspected lists.
-        self.positions = self.pos_xy
-        self.velocities = self.vel_xy
-        self._texture = None
+        self._texture: Texture2D | None = None
+        self._text: pu.Text | None = None
 
         self._benchmark_start = 0.0
         self._last_frame_time: float | None = None
@@ -199,10 +204,7 @@ class BunnyBenchmarkScene(pu.SceneUnit):
             self._text = pu.Text()
         self._add_bunnies(self.config.initial_bunnies, source="initial")
 
-        # Fix #5: Minimalisir GC pause selama benchmark.
-        # gc.collect() bersihkan semua garbage sekarang, gc.freeze() membekukan
-        # semua objek yang sudah ada agar tidak di-scan oleh GC generational —
-        # ini mencegah pause periodik yang menyebabkan spike frame time.
+        # Freeze existing objects to avoid periodic GC scans during measurement.
         gc.collect()
         gc.freeze()
 
@@ -222,10 +224,10 @@ class BunnyBenchmarkScene(pu.SceneUnit):
 
     def on_unload(self) -> None:
         if self._texture is not None:
-            pr.unload_texture(self._texture)
+            pr.unload_texture(self._texture.raw_texture)
         self._texture = None
         self._text = None
-        # Pulihkan GC ke kondisi normal setelah benchmark selesai
+        # Restore normal garbage collection after measurement.
         gc.unfreeze()
 
     def update(self, dt: float) -> None:
@@ -244,7 +246,7 @@ class BunnyBenchmarkScene(pu.SceneUnit):
         if self.bunny_count > self._peak_bunnies:
             self._peak_bunnies = self.bunny_count
 
-    def render_submit(self, renderer) -> None:
+    def _submit_frame(self, renderer) -> None:
         now = time.perf_counter()
         if self._last_frame_time is not None:
             frame_dt = max(_EPSILON, now - self._last_frame_time)
@@ -303,15 +305,21 @@ class BunnyBenchmarkScene(pu.SceneUnit):
         )
 
     def _create_texture(self) -> None:
-        # Canvas is a free-function module (factory returns the module).
-        canvas = pu.Canvas() if callable(pu.Canvas) else pu.Canvas
-        image = pr.gen_image_color(
-            self.config.sprite_size,
-            self.config.sprite_size,
-            canvas.color((235, 235, 235, 255)),
+        from plyunit.backends.integrations.raylib.handler import Image, Texture2D
+
+        image = Image(
+            pr.gen_image_color(
+                self.config.sprite_size,
+                self.config.sprite_size,
+                pr.Color(235, 235, 235, 255),
+            )
         )
-        self._texture = pr.load_texture_from_image(image)
-        pr.unload_image(image)
+        try:
+            self._texture = Texture2D.from_raw(
+                pr.load_texture_from_image(image.raw_image)
+            )
+        finally:
+            pr.unload_image(image.raw_image)
 
     def _add_bunnies(self, count: int, *, source: str = "auto") -> int:
         if count <= 0:
@@ -341,8 +349,6 @@ class BunnyBenchmarkScene(pu.SceneUnit):
         else:
             self.pos_xy = np.vstack((self.pos_xy, new_pos))
             self.vel_xy = np.vstack((self.vel_xy, new_vel))
-        self.positions = self.pos_xy
-        self.velocities = self.vel_xy
 
         if source == "keyboard":
             self._keyboard_added += to_add
@@ -358,8 +364,6 @@ class BunnyBenchmarkScene(pu.SceneUnit):
         keep = self.bunny_count - to_remove
         self.pos_xy = self.pos_xy[:keep].copy()
         self.vel_xy = self.vel_xy[:keep].copy()
-        self.positions = self.pos_xy
-        self.velocities = self.vel_xy
         self._keyboard_removed += to_remove
         return to_remove
 
@@ -464,7 +468,10 @@ class BunnyBenchmarkScene(pu.SceneUnit):
 
     def _submit_overlay(self, renderer) -> None:
         _ = renderer
-        self._text.push(
+        text = self._text
+        if text is None:
+            raise RuntimeError("The benchmark text service is not initialized")
+        text.push(
             (
                 f"Bunnies: {self.bunny_count} | "
                 f"Target: {self.config.target_bunnies} | "
@@ -486,6 +493,9 @@ class BunnyBenchmarkApp(pu.App):
         self.scene: BunnyBenchmarkScene | None = None
 
     def on_load(self) -> None:
+        # This regression gate measures the flat batch path, not spatial indexing.
+        if self.one_or_none("@SpatialIndex", scope="global") is not None:
+            raise RuntimeError("Bunny benchmark requires SpatialIndex to stay disabled")
         cfg = self.benchmark_config
         self.input = pu.Input()
         self.input.map(
@@ -510,7 +520,7 @@ class BunnyBenchmarkApp(pu.App):
         _ = dt
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((245, 245, 245, 255))
+        self.window.clear_background(self.benchmark_config.background_color)
         self.scene_manager.render(self.renderer)
         self.renderer.flush_all()
         self.window.end_drawing()
@@ -585,9 +595,7 @@ def _build_parser() -> argparse.ArgumentParser:
         help="capped: enforce target-fps. uncapped: no runtime cap.",
     )
     parser.add_argument("--fixed-update-hz", type=int, default=60)
-    # Fix #1: default 1 substep/frame untuk benchmark — mencegah "catch-up spike"
-    # saat frame sebelumnya lambat (misal GC pause) agar tidak memicu simulasi
-    # 2-5x dalam satu frame berikutnya yang menghancurkan min_fps.
+    # One substep avoids catch-up spikes after a slow frame or GC pause.
     parser.add_argument("--max-substeps-per-frame", type=int, default=1)
     parser.add_argument("--max-frame-delta-time", type=float, default=0.25)
 
@@ -730,7 +738,6 @@ def run_benchmark(config: BenchmarkConfig) -> BenchmarkResult:
             fixed_update_hz=config.fixed_update_hz,
             max_frame_delta_time=config.max_frame_delta_time,
             max_substeps_per_frame=config.max_substeps_per_frame,
-            background_color=config.background_color,
         ),
     )
     start = time.perf_counter()

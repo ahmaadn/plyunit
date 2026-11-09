@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from plyunit.core.types import RectType, ShaderType
+from plyunit.core.types import RectType
 
 from .enum import BlendMode
 
 if TYPE_CHECKING:
+    from plyunit.backends.ports.handler import ShaderHandle
     from plyunit.core.components.transform import Transform2D
 
 
@@ -42,12 +43,12 @@ class RenderContext:
     screen_space: bool = False
     scissor: RectType | None = None
     blend_mode: BlendMode = BlendMode.ALPHA
-    shader: ShaderType | None = None
+    shader: ShaderHandle | None = None
     state_id: int = 0
     y_sort: bool = False
     y_sort_origin: float = 0.0
-    world_transform: Transform2D | Any | None = None
-    render_transform: Transform2D | Any | None = None
+    world_transform: Transform2D | None = None
+    render_transform: Transform2D | None = None
 
     def derive(self, **overrides: object) -> RenderContext:
         """Returns a derived ``RenderContext`` with certain fields replaced.

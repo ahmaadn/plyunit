@@ -219,6 +219,8 @@ class TransformTween(Tween):
             Self, for chaining.
         """
         t = self.target
+        if t is None:
+            raise ValueError("TransformTween requires a transform target")
         self._add(
             "position",
             lambda: t.local.position,
@@ -238,6 +240,8 @@ class TransformTween(Tween):
             Self, for chaining.
         """
         t = self.target
+        if t is None:
+            raise ValueError("TransformTween requires a transform target")
         self._add(
             "rotation",
             lambda: float(t.local.rotation),
@@ -257,6 +261,8 @@ class TransformTween(Tween):
             Self, for chaining.
         """
         t = self.target
+        if t is None:
+            raise ValueError("TransformTween requires a transform target")
         self._add(
             "scale",
             lambda: t.local.scale,

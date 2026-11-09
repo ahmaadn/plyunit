@@ -34,7 +34,7 @@ class StencilApp(pu.App):
         _ = dt
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((245, 245, 245, 255))
+        self.window.clear_background((12, 14, 24, 255))
 
         # Immediate DrawScope drawing — valid inside the drawing block.
         self._draw_content()
@@ -77,7 +77,6 @@ def main() -> None:
             title="Stencil Mask Example",
             window_width=800,
             window_height=480,
-            background_color=pr.Color(12, 14, 24, 255),
         ),
     )
     app.run()

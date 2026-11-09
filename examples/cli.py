@@ -86,7 +86,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--example",
         metavar="NAME",
-        help="Example short name (e.g. shapes, physics, tilemap)",
+        help="Example short name (e.g. shapes, physics, texture-atlas)",
     )
     for flag in sorted(EXAMPLES):
         parser.add_argument(

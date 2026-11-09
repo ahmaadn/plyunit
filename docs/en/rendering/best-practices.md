@@ -18,7 +18,7 @@ What do you need to draw?
 ├─ Shapes / lines / circles
 │     → canvas.create_rect / create_circle / ... (bake once)
 │     → store via Assets.store_texture, render via render_sprite / render_sprites
-│     → (immediate render_rect / render_circle / render_line are deprecated)
+│     → Dynamic/debug outlines: render_custom + canvas.draw_*
 │
 ├─ UI (screen space)
 │     → typed render_* with Layer.UI / Text.push
@@ -29,12 +29,14 @@ What do you need to draw?
 
 ## 2. Do
 
-- **Submit in `render_submit`**, not in `update` (the queue is filled per render frame).
+- **Nodes/components submit in `render_submit(renderer, context)`**, not fixed `update`. App-level submissions belong in `App.update(dt)` after `reset_frame` and before `flush_all`.
 - **Share material** within a batch: texture, source, layer, z, tint, scale, rotation, origin, blend, shader, scissor.
 - **Use the same `z` / `z_index`** for objects that do not need a unique order (unique z breaks runs).
 - **Transforms via setters**: `set_position` / `set_rotation` / `set_scale` so SoA dirty tracking stays correct.
 - **Opt-in culling**: `SpatialIndex` only for large gameplay queries / culling; **turn it off** for bunny-style stress (flat lists).
 - **Data-oriented hot path**: contiguous `numpy.float32` arrays for positions and `pos_xy=` for a bulk append without a Python loop; data is still copied into the FrameBuffer.
+- **Opaque handles**: resolve textures from `Assets`; do not read raw resource fields or assume the logical `texture_id` is a GPU integer.
+- **Load once**: bake reusable geometry in load hooks after bootstrap; `Assets` owns standalone textures, never borrowed render-target/font/stream attachments.
 
 ## 3. Don't
 
@@ -115,19 +117,24 @@ class BunnyLikeField(pu.NodeUnit):
         self.vel_xy = np.zeros((n, 2), dtype=np.float32)
 
     def update(self, dt: float) -> None:
-        self.pos_xy += self.vel_xy  # vectorized sim
+        self.pos_xy += self.vel_xy * dt  # velocities in pixels per second
         # bounce / wrap ...
 
     def render_submit(self, renderer, context=None) -> None:
         renderer.render_batch(
             texture=self.texture,
-            positions=self.pos_xy,   # optional if pos_xy set
             pos_xy=self.pos_xy,      # vectorized copy → FrameBuffer → UBR
             layer=int(pu.Layer.ENTITIES),
             z=0,
             tint=(255, 255, 255, 255),
         )
 ```
+
+`Canvas2D()` returns the module-backed drawing port, not a Canvas class.
+For dynamic geometry use `render_custom` with the supplied `ICanvas2D` and
+its `draw_rectangle` / `draw_circle` / `draw_line` methods. The former
+`Renderer` primitive-submit methods are removed, with no fallback aliases.
+`SceneUnit` has no `render_submit`; put rendering in a node/system or the App.
 
 Details: [ubr.md](ubr.md).
 

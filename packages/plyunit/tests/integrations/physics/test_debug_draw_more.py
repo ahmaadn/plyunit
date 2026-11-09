@@ -54,13 +54,16 @@ def test_debug_draw_visibility_and_camera():
         def create_pass(self, name, **kw):
             self.passes.append((name, kw))
 
-        def render_circle(self, **kw):
+        def render_custom(self, *, draw_func, **state):
+            draw_func(self)
+
+        def draw_circle(self, **kw):
             self.primitives.append(("c", kw))
 
-        def render_rect(self, **kw):
+        def draw_rectangle(self, **kw):
             self.primitives.append(("r", kw))
 
-        def render_line(self, **kw):
+        def draw_line(self, **kw):
             self.primitives.append(("l", kw))
 
     dbg = PhysicsDebugDraw(
@@ -102,14 +105,8 @@ def test_debug_draw_without_service():
         def create_pass(self, *a, **k):
             pass
 
-        def render_circle(self, **k):
-            pass
-
-        def render_rect(self, **k):
-            pass
-
-        def render_line(self, **k):
-            pass
+        def render_custom(self, **kwargs):
+            pytest.fail("No drawing should be queued without a physics service")
 
     dbg = PhysicsDebugDraw()
     # pyrefly: ignore [bad-assignment]

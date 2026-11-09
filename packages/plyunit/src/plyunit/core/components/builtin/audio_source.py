@@ -1,14 +1,22 @@
+"""Node-attached audio playback through the backend-independent audio port."""
+
 from __future__ import annotations
 
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
+from plyunit.backends.ports.audio import IAudio
 from plyunit.core.components.component import Component
+
+if TYPE_CHECKING:
+    from plyunit.services.audio._types import VoiceId
 
 
 class AudioSource(Component):
-    """Play a sound or music stream attached to a ``NodeUnit``.
+    """Play a sound or music stream attached to a node.
 
-    Resolves ``Audio`` by name only (core must not import engine).
+    Discover the registered service structurally through ``IAudio``. Playback
+    tokens belong to the exact service that issued them, even if the registry
+    later contains a replacement service.
     """
 
     updates = True
@@ -24,20 +32,19 @@ class AudioSource(Component):
         pitch: float = 1.0,
         kind: Literal["sound", "music"] = "sound",
     ) -> None:
-        """Initializes the AudioSource.
+        """Initialize a node-attached audio source.
 
         Args:
-            asset_id: Sound asset ID in ``Audio``.
-            auto_play: Play automatically on ``on_start``.
-            loop: Loop the sound/music.
-            spatial: Play with 3D/2D positioning (sound only).
-            volume: Initial volume (``0.0`` - ``1.0``).
-            pitch: Pitch multiplier.
-            kind: ``"sound"`` or ``"music"``.
+            asset_id: Loaded sound or music ID in the audio service.
+            auto_play: Start playback automatically in ``on_start``.
+            loop: Restart completed sounds or enable music-stream looping.
+            spatial: Track the node's 2D world position for sounds.
+            volume: Per-play volume.
+            pitch: Sound pitch multiplier; ignored for music.
+            kind: Asset kind, either ``"sound"`` or ``"music"``.
 
         Raises:
-            ValueError: If ``kind == "music"`` and ``spatial=True``, or
-                ``kind`` is not a valid value.
+            ValueError: If music is spatial or the asset kind is unknown.
         """
         super().__init__("AudioSource")
         if kind == "music" and spatial:
@@ -51,77 +58,90 @@ class AudioSource(Component):
         self.volume = volume
         self.pitch = pitch
         self.kind = kind
-        self._voice_id = None
+        self._voice_id: VoiceId | None = None
         self._music_generation: int | None = None
         self._music_id: str | None = None
+        self._playback_audio: IAudio | None = None
 
-    def _audio(self):
-        """Internal hook: gets the ``Audio`` service.
+    def _audio(self) -> IAudio:
+        """Find the single registered service implementing the audio port.
 
         Returns:
-            The ``Audio`` instance.
+            The audio service, regardless of its concrete class or name.
 
         Raises:
-            RuntimeError: If ``Audio`` is not registered.
+            RuntimeError: If the source is unattached, audio is missing, or
+                multiple audio services are registered.
         """
-        try:
-            return self.unit.one("Audio")
-        except Exception as exc:
+        if self.unit is None:
+            raise RuntimeError("AudioSource must be attached to a node before playback")
+        # Registry type queries use exact classes, so protocols need a structural
+        # scan of the registry's service owners rather than a class/name query.
+        services = self.unit.global_units._service_order.values()
+        matches = [service for service in services if isinstance(service, IAudio)]
+        if not matches:
             raise RuntimeError(
-                "AudioSource requires Audio (enable AppConfig.audio "
-                "or construct Audio while App is active)"
-            ) from exc
+                "AudioSource requires a registered IAudio service "
+                "(enable AppConfig.audio or construct an audio service)"
+            )
+        if len(matches) != 1:
+            raise RuntimeError(
+                "AudioSource requires exactly one registered IAudio service"
+            )
+        return matches[0]
 
     def on_start(self) -> None:
-        """Lifecycle hook: auto-``play()`` if ``auto_play=True``."""
+        """Start playback when automatic playback is enabled."""
         if self.auto_play:
             self.play()
 
     def update(self, dt: float) -> None:
-        """Updates the spatial voice position and restarts the loop sound if the
-        voice finished.
+        """Move live spatial sounds and restart completed looping sounds.
 
         Args:
             dt: Fixed-step delta time in seconds.
         """
-        if not self.enabled:
+        if not self.enabled or self.kind != "sound" or self._voice_id is None:
             return
-        audio = None
-        if self.spatial and self._voice_id is not None:
-            audio = self._audio()
-            if audio.is_voice_playing(self._voice_id):
-                pos = self.unit.transform.world.position
-                audio.set_voice_position(self._voice_id, pos[0], pos[1])
-            else:
-                self._voice_id = None
-
-        if self.kind == "sound" and self.loop and self._voice_id is not None:
-            if audio is None:
-                audio = self._audio()
-            if not audio.is_voice_playing(self._voice_id):
-                self._voice_id = None
+        audio = self._playback_audio
+        if audio is None or not audio.active:
+            self._voice_id = None
+            self._playback_audio = None
+            return
+        if not audio.is_voice_playing(self._voice_id):
+            self._voice_id = None
+            self._playback_audio = None
+            if self.loop:
                 self.play()
+            return
+        if self.spatial:
+            pos = self.unit.transform.world.position
+            audio.set_voice_position(self._voice_id, pos[0], pos[1])
 
     def on_destroy(self) -> None:
-        """Lifecycle hook: stops playback, then calls ``super().on_destroy()``."""
-        self.stop()
-        super().on_destroy()
+        """Stop owned playback and finish component teardown."""
+        try:
+            self.stop()
+        finally:
+            super().on_destroy()
 
     def play(self) -> None:
-        """Starts playing the asset (sound or music)."""
+        """Replace this source's playback with a new sound or music stream.
+
+        Raises:
+            RuntimeError: If no unambiguous audio service is registered or its
+                device is inactive.
+            KeyError: If the asset is not loaded by the audio service.
+        """
         audio = self._audio()
+        self.stop()
         if self.kind == "music":
-            gen = audio.play_music(self.asset_id, loop=self.loop, volume=self.volume)
-            self._music_generation = gen
+            generation = audio.play_music(
+                self.asset_id, loop=self.loop, volume=self.volume
+            )
+            self._music_generation = generation
             self._music_id = self.asset_id
-            self._voice_id = None
-            return
-
-        if self._voice_id is not None:
-            audio.stop_voice(self._voice_id)
-            self._voice_id = None
-
-        if self.spatial:
+        elif self.spatial:
             pos = self.unit.transform.world.position
             self._voice_id = audio.play_sound_at(
                 self.asset_id,
@@ -133,47 +153,46 @@ class AudioSource(Component):
             )
         else:
             self._voice_id = audio.play_sound(
-                self.asset_id,
-                volume=self.volume,
-                pitch=self.pitch,
+                self.asset_id, volume=self.volume, pitch=self.pitch
             )
+        self._playback_audio = audio
 
     def stop(self) -> None:
-        """Stops the active sound/music playback."""
-        audio = self.unit.one_or_none("Audio")
-        if audio is None:
+        """Stop only playback owned by this source and clear its tokens."""
+        audio = self._playback_audio
+        try:
+            if audio is None:
+                return
+            if self._voice_id is not None:
+                audio.stop_voice(self._voice_id)
+            if self._music_generation is not None and audio.owns_music(
+                self._music_generation, self._music_id
+            ):
+                audio.stop_music()
+        finally:
             self._voice_id = None
             self._music_generation = None
             self._music_id = None
-            return
-
-        if self._voice_id is not None:
-            audio.stop_voice(self._voice_id)
-            self._voice_id = None
-
-        if (
-            self._music_generation is not None and self._music_id is not None
-        ) and audio.owns_music(self._music_generation, self._music_id):
-            audio.stop_music()
-        self._music_generation = None
-        self._music_id = None
+            self._playback_audio = None
 
     def pause(self) -> None:
-        """Pauses the music (no-op for ``kind="sound"``)."""
-        if self.kind != "music":
-            return
-        audio = self._audio()
-        if self._music_generation is not None and audio.owns_music(
-            self._music_generation, self._music_id
+        """Pause owned music without affecting other sources or sounds."""
+        audio = self._playback_audio
+        if (
+            self.kind == "music"
+            and audio is not None
+            and self._music_generation is not None
+            and audio.owns_music(self._music_generation, self._music_id)
         ):
             audio.pause_music()
 
     def resume(self) -> None:
-        """Resumes paused music (no-op for ``kind="sound"``)."""
-        if self.kind != "music":
-            return
-        audio = self._audio()
-        if self._music_generation is not None and audio.owns_music(
-            self._music_generation, self._music_id
+        """Resume owned music without affecting other sources or sounds."""
+        audio = self._playback_audio
+        if (
+            self.kind == "music"
+            and audio is not None
+            and self._music_generation is not None
+            and audio.owns_music(self._music_generation, self._music_id)
         ):
             audio.resume_music()

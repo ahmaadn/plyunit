@@ -7,13 +7,15 @@ import weakref
 from typing import TYPE_CHECKING
 
 from plyunit.core.components import Component
-from plyunit.core.types import ColorType, SourceRectType, Texture, Vec2Type
+from plyunit.core.types import ColorType, RectType, Vec2Type
 from plyunit.rendering.enum import Layer
 from plyunit.rendering.render_context import RenderContext
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from plyunit.backends.ports.assets import IAssets
+    from plyunit.backends.ports.handler import Texture2DHandle
     from plyunit.rendering.renderer import Renderer
 
 
@@ -42,9 +44,9 @@ class SpriteRenderer(Component):
     def __init__(
         self,
         asset_key: str | None = None,
-        texture: Texture | None = None,
+        texture: Texture2DHandle | None = None,
         *,
-        source_rect: SourceRectType | None = None,
+        source_rect: RectType | None = None,
         pivot: Vec2Type = (0.0, 0.0),
         visible: bool = True,
         name: str | None = None,
@@ -60,9 +62,8 @@ class SpriteRenderer(Component):
 
         Args:
             asset_key: Key used to fetch the texture from the AssetManager.
-            texture: Direct texture (alternative to asset_key).
-            source_rect: Region (x, y, w, h) of the texture to draw.
-                        None = use the entire texture.
+            texture: Borrowed texture handle (alternative to asset_key).
+            source_rect: Region (x, y, w, h), or ``None`` for the handle's region.
             layer: Render layer (default WORLD). Lower values are drawn first.
             pivot: Rotation pivot point (default top-left).
             visible: Whether the sprite is visible (default True).
@@ -85,7 +86,7 @@ class SpriteRenderer(Component):
         # frame per sprite is a full registry query (render hot path). The weakref
         # is automatically invalidated when the service is replaced/destroyed
         # (e.g. in the editor).
-        self._assets_ref: weakref.ref | None = None
+        self._assets_ref: weakref.ref[IAssets] | None = None
 
         self.layer = layer
         self.pivot = pivot
@@ -102,7 +103,7 @@ class SpriteRenderer(Component):
         if self._asset_key is None and self._texture is None:
             raise ValueError("Either asset_key or texture must be provided")
 
-    def _assets(self):
+    def _assets(self) -> IAssets | None:
         """Resolves the Assets service with a weakref cache (see ``_assets_ref``)."""
         ref = self._assets_ref
         if ref is not None:
@@ -115,28 +116,30 @@ class SpriteRenderer(Component):
         self._assets_ref = weakref.ref(assets)
         return assets
 
-    def texture(self) -> Texture:
+    def texture(self) -> Texture2DHandle:
         """Gets the current texture.
 
         If using asset_key, fetch it from the AssetManager.
         If using a direct texture, return that texture.
 
         Returns:
-            Texture: The texture to be rendered.
+            The borrowed texture handle to render.
         """
         if self._asset_key:
             assets = self._assets()
             if assets is None:
                 raise RuntimeError(
-                    "SpriteRenderer belum bisa resolve texture: unit belum "
-                    "attach / service Assets tidak ditemukan."
+                    "Cannot resolve sprite texture before attaching the unit "
+                    "and registering an Assets service."
                 )
             return assets[self._asset_key]
 
+        if self._texture is None:
+            raise RuntimeError("SpriteRenderer requires an asset key or texture handle")
         return self._texture
 
     def set_texture(
-        self, *, asset_key: str | None = None, texture: Texture | None = None
+        self, *, asset_key: str | None = None, texture: Texture2DHandle | None = None
     ) -> None:
         """Changes the sprite's texture.
 
@@ -162,8 +165,7 @@ class SpriteRenderer(Component):
         """Changes the source rect for a sprite sheet.
 
         Args:
-            rect: Region (x, y, w, h) of the texture to draw.
-                  None = use the entire texture.
+            rect: Region (x, y, w, h), or ``None`` for the handle's region.
         """
         if rect is not None:
             self.source_rect = (
@@ -173,10 +175,6 @@ class SpriteRenderer(Component):
                 rect[3],
             )
         else:
-            # Fallback using entire texture if source_rect is set to None
-            # If source_rect is set to None, the entire texture is used as
-            # the source rect. The source rect is auto-computed from the
-            # current texture size, so setting None here is fine.
             self.source_rect = None
 
     def set_layer(self, layer: int) -> None:
@@ -286,13 +284,9 @@ class SpriteRenderer(Component):
         if texture.width <= 0 or texture.height <= 0:
             return None
 
-        src = self.source_rect
-        if src:
-            w = abs(src[2]) * self.scale
-            h = abs(src[3]) * self.scale
-        else:
-            w = texture.width * self.scale
-            h = texture.height * self.scale
+        src = self.source_rect if self.source_rect is not None else texture.source_rect
+        w = abs(src[2] * self.scale)
+        h = abs(src[3] * self.scale)
 
         px, py = transform.position
         ox, oy = self.pivot
@@ -309,47 +303,16 @@ class SpriteRenderer(Component):
 
         return (px - ox, py - oy, w, h)
 
-    def _compute_flipped_source_rect(self) -> tuple[float, float, float, float] | None:
-        """Computes the source rect while accounting for flip_x and flip_y.
-
-        If source_rect is not provided, use the entire texture.
-        If flip_x or flip_y is enabled, reverse the width or height direction
-            (make the value negative).
-
-        Raylib supports negative width/height for flipping. Examples:
-        - source_rect=(0, 0, 100, 100) normal
-        - source_rect=(100, 0, -100, 100) horizontal flip
-        - source_rect=(0, 100, 100, -100) vertical flip
+    def _compute_flipped_source_rect(self) -> RectType:
+        """Return the handle's region with signed sizes for mirrored UVs.
 
         Returns:
-            tuple[float, float, float, float] | None: Source rect (x, y, w, h),
-                or None if the texture is invalid.
+            Source rectangle in whole-texture pixel coordinates. An explicit
+            source rectangle overrides the handle's region.
         """
         source = self.source_rect
-        if source is None and self._asset_key and self.unit:
-            asset_manager = self._assets()
-            if asset_manager is not None and hasattr(asset_manager, "get_source_rect"):
-                source = asset_manager.get_source_rect(self._asset_key)
-
         if source is None:
-            if not (self.flip_x or self.flip_y):
-                return None
-
-            texture = self.texture()
-            width = texture.width
-            height = texture.height
-
-            # If the texture is invalid (e.g. width or height <= 0),
-            # then there is no usable source rect
-            if width <= 0.0 or height <= 0.0:
-                return None
-
-            # Flip needs an explicit source rect (negative w/h).
-            source = (0.0, 0.0, width, height)
-
-        if not (self.flip_x or self.flip_y):
-            return source
-
+            source = self.texture().source_rect
         x, y, w, h = source
         if self.flip_x:
             x += w

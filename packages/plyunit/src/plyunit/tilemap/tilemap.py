@@ -14,12 +14,12 @@ from __future__ import annotations
 import json
 import logging
 import warnings
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
+from math import ceil
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from plyunit.backends.interfaces.i_renderer import ICanvas2D
-from plyunit.core.types import RenderTexture
+from plyunit._enums import TextureFilter
 from plyunit.core.units.node_unit import NodeUnit
 from plyunit.events.signal import Signal
 from plyunit.tilemap.map_data import LayerMeta, ObjectData
@@ -41,6 +41,9 @@ from .physics_bridge import TileMapPhysicsBridge
 from .tile_geometry import tile_dest_rect, tile_is_oversized, tile_overhang
 
 if TYPE_CHECKING:
+    from plyunit.backends.ports.assets import IAssets
+    from plyunit.backends.ports.handler import RenderTextureHandle, Texture2DHandle
+    from plyunit.backends.ports.renderer import ICanvas2D
     from plyunit.rendering.renderer import Renderer
 
 logger = logging.getLogger(__name__)
@@ -53,10 +56,10 @@ _LAYER_BAKED_BASE = -1000
 
 
 class _GidEntry:
-    """Cached lookup GID -> (texture, source rect, asset_id).
+    """Cache a GID's borrowed texture handle and tile geometry.
 
     Attributes:
-        texture: Backend-specific texture handle.
+        texture: Opaque texture handle supplied by the asset port.
         source_rect: The portion of the texture used, tuple ``(x, y, w, h)``.
         asset_id: Texture asset ID in the Assets service.
         oversized: True if the image is larger than one grid cell. Such
@@ -69,7 +72,7 @@ class _GidEntry:
 
     def __init__(
         self,
-        texture: Any,
+        texture: Texture2DHandle,
         source_rect: tuple[float, float, float, float],
         asset_id: str,
         oversized: bool = False,
@@ -77,7 +80,7 @@ class _GidEntry:
         """Initializes a GID cache entry.
 
         Args:
-            texture: Backend texture handle.
+            texture: Opaque texture handle.
             source_rect: Source rectangle ``(x, y, w, h)`` inside the texture.
             asset_id: Texture asset ID.
             oversized: True if the image exceeds one grid cell.
@@ -87,28 +90,12 @@ class _GidEntry:
         self.asset_id = asset_id
         self.oversized = oversized
 
-    def is_oversized(self, tile_size: int):
-        """True if the entry marks an image larger than one cell.
-
-        Recomputed from ``source_rect`` when the ``oversized`` attribute is
-        missing: ``_gid_map`` can be filled directly by tests or other code
-        with duck-typed objects that only have ``texture`` and
-        ``source_rect``.
-        """
-        flag = self.oversized
-        if flag is not None:
-            return flag
-        src = self.source_rect
-        return tile_is_oversized(tile_size, src[2], src[3])
-
 
 def parse_map_config(raw: dict) -> MapConfig:
     """Parses a raw JSON dict into a :class:`MapConfig`.
 
     Args:
         raw: Dict from ``json.load`` of a map file.
-        decoders: Custom decoder registry. Currently reserved for
-            extensions only; not used in basic parsing.
 
     Returns:
         MapConfig: The strongly-typed map structure ready for runtime use.
@@ -211,8 +198,8 @@ class TileMapNode(NodeUnit):
         self.chunk_size: int = 16
 
         self._gid_map: dict[GID, _GidEntry] = {}
-        self._baked_render: dict[tuple[ChunkKey, LayerID], RenderTexture] = {}
-        self._spawned_physics: dict[ChunkKey, list[object]] = {}
+        self._baked_render: dict[tuple[ChunkKey, LayerID], RenderTextureHandle] = {}
+        self._spawned_physics: dict[ChunkKey, Sequence[object]] = {}
         #: Largest overhang ``(right, up)`` across all oversized tiles.
         #: Widens culling so tall images do not flicker out when their
         #: owning chunk leaves the camera view.
@@ -241,7 +228,11 @@ class TileMapNode(NodeUnit):
             self.load_map(config_path, on_objects=on_objects)
 
     def _canvas(self) -> ICanvas2D:
-        """Gets the canvas of the active Renderer (via a one() query)."""
+        """Return the renderer's canvas through a single service query.
+
+        Returns:
+            The active renderer's backend-neutral canvas.
+        """
         return self.one("@Renderer").canvas
 
     @property
@@ -412,11 +403,18 @@ class TileMapNode(NodeUnit):
         return arr
 
     def _resolve_gid_map(self) -> None:
-        """Builds the GID -> texture cache from the Assets service."""
+        """Refresh borrowed handles and geometry from the asset port.
+
+        Previously resolved handles are discarded even when an asset is no
+        longer available. Asset replacement or atlas repacking requires a new
+        resolution before the handles are submitted again.
+        """
+        self._gid_map.clear()
+        self._max_overhang = (0.0, 0.0)
         if self.config is None:
             return
 
-        assets = self.one_or_none("@Assets", scope="global")
+        assets: IAssets | None = self.one_or_none("@Assets", scope="global")
         if assets is None:
             assets = self.one_or_none("@Assets")
         if assets is None:
@@ -431,15 +429,15 @@ class TileMapNode(NodeUnit):
             if asset_id is None:
                 continue
             try:
-                t_data = assets.get_texture_data(asset_id)
-                src = t_data.source_rect
+                texture = assets.get_asset(asset_id)
+                src = texture.source_rect
                 oversized = tile_is_oversized(ts, src[2], src[3])
                 if oversized:
                     over_x, over_y = tile_overhang(ts, src[2], src[3])
                     max_over_x = max(max_over_x, over_x)
                     max_over_y = max(max_over_y, over_y)
                 self._gid_map[gid] = _GidEntry(
-                    texture=t_data.texture,
+                    texture=texture,
                     source_rect=src,
                     asset_id=asset_id,
                     oversized=oversized,
@@ -584,7 +582,6 @@ class TileMapNode(NodeUnit):
 
         gid_array[idx] = gid
         chunk.raw_layers[layer_id] = gid_array
-        chunk.decoded = True
         self.tile_changed.emit(key, layer_id, grid_x, grid_y, old_gid, gid)
         return True
 
@@ -594,26 +591,29 @@ class TileMapNode(NodeUnit):
         gid: GID,
         layer_id: LayerID = "1",
     ) -> int:
-        """Fills a rectangular area with a GID.
+        """Fill every grid cell intersecting a half-open world rectangle.
 
         Args:
-            rect: Rectangle ``(x, y, w, h)`` in pixels.
+            rect: Rectangle ``(x, y, w, h)`` in pixels. Fractional extents are
+                supported; nonpositive width or height changes no tiles.
             gid: GID to install.
             layer_id: Target layer ID.
 
         Returns:
-            int: The number of tiles that actually changed.
+            The number of tiles that actually changed.
         """
         x, y, w, h = rect
+        if w <= 0 or h <= 0:
+            return 0
         ts = self.tile_size
         gx0 = int(x // ts)
         gy0 = int(y // ts)
-        gx1 = int((x + w - 1) // ts) if w > 0 else gx0 - 1
-        gy1 = int((y + h - 1) // ts) if h > 0 else gy0 - 1
+        gx1 = ceil((x + w) / ts)
+        gy1 = ceil((y + h) / ts)
 
         changed = 0
-        for gy in range(gy0, gy1 + 1):
-            for gx in range(gx0, gx1 + 1):
+        for gy in range(gy0, gy1):
+            for gx in range(gx0, gx1):
                 if self.set_tile(gx * ts, gy * ts, gid, layer_id):
                     changed += 1
         return changed
@@ -765,7 +765,7 @@ class TileMapNode(NodeUnit):
         if ids:
             self._spawned_physics[key] = ids
 
-    def _despawn_chunk_physics(self, ids: list[object]) -> None:
+    def _despawn_chunk_physics(self, ids: Sequence[object]) -> None:
         """Removes static bodies by the id list returned at spawn time."""
         bridge = self.get_bridge()
         if bridge is None:
@@ -879,7 +879,13 @@ class TileMapNode(NodeUnit):
     def _bake_chunk_layer(
         self, key: ChunkKey, chunk: ChunkRT, layer_id: LayerID
     ) -> None:
-        """Bakes one chunk layer into a render texture (cached)."""
+        """Bake and cache a layer, releasing its target if rendering fails.
+
+        Args:
+            key: Chunk key.
+            chunk: Decoded chunk data.
+            layer_id: Layer to bake.
+        """
         bake_key = (key, layer_id)
         if bake_key in self._baked_render:
             return
@@ -896,12 +902,18 @@ class TileMapNode(NodeUnit):
         px = self.chunk_size * self.tile_size
         canvas = self._canvas()
         rt = canvas.load_render_texture(px, px)
-        canvas.begin_texture_mode(rt)
-        canvas.clear_transparent()
-        self._draw_layer_to_texture(gid_array)
-        canvas.end_texture_mode()
-        # Point filter: pixel tiles stay sharp; trilinear + pan caused shimmer.
-        canvas.set_texture_filter(rt, "point")
+        try:
+            canvas.begin_texture_mode(rt)
+            try:
+                canvas.clear_background((0, 0, 0, 0))
+                self._draw_layer_to_texture(gid_array, canvas)
+            finally:
+                canvas.end_texture_mode()
+            # Nearest filtering keeps pixel tiles sharp while panning.
+            canvas.set_texture_filter(rt, TextureFilter.NEAREST)
+        except BaseException:
+            canvas.unload_render_texture(rt)
+            raise
         self._baked_render[bake_key] = rt
 
     def _has_bakeable_tile(self, gid_array: list[GID]) -> bool:
@@ -910,7 +922,7 @@ class TileMapNode(NodeUnit):
             if gid == 0:
                 continue
             entry = self._gid_map.get(gid)
-            if entry is not None and not entry.is_oversized(self.tile_size):
+            if entry is not None and not entry.oversized:
                 return True
         return False
 
@@ -938,16 +950,16 @@ class TileMapNode(NodeUnit):
         for chunk in self.config.chunks.values():
             self._decode_chunk_layers(chunk)
 
-    def _draw_layer_to_texture(self, gid_array: list[GID]) -> None:
-        """Renders a GID array into the active render texture
-        (used by ``_bake_chunk_layer``).
+    def _draw_layer_to_texture(self, gid_array: list[GID], canvas: ICanvas2D) -> None:
+        """Draw cell-sized tiles into the canvas's active render target.
 
-        Oversized tiles are **skipped**: a chunk RT is exactly one chunk in
-        size, so spilling image parts would be clipped at the chunk
-        boundary. Those tiles are submitted separately by
-        :meth:`_submit_oversized_tiles`.
+        Oversized tiles are skipped because a chunk-sized target would clip
+        their overhang. They are submitted separately in world space.
+
+        Args:
+            gid_array: Decoded tile IDs for the layer.
+            canvas: The canvas that owns the active render target.
         """
-        canvas = self._canvas()
         ts = self.tile_size
         cs = self.chunk_size
 
@@ -955,7 +967,7 @@ class TileMapNode(NodeUnit):
             if gid == 0 or gid not in self._gid_map:
                 continue
             entry = self._gid_map[gid]
-            if entry.is_oversized(self.tile_size):
+            if entry.oversized:
                 continue
             col = i % cs
             row = i // cs
@@ -985,37 +997,49 @@ class TileMapNode(NodeUnit):
             self._despawn_chunk_physics(ids)
 
     def _visible_chunk_keys(self) -> set[ChunkKey]:
-        """Computes the set of chunk keys visible in the viewport (with margin)."""
-        all_keys: set[ChunkKey] = set(self.config.chunks.keys())  # type: ignore[union-attr]
+        """Return existing chunks that can draw into the viewport.
+
+        The viewport uses half-open bounds. Oversized tiles widen the range
+        toward their owning cells rather than toward the image's overhang.
+
+        Returns:
+            Existing chunk keys inside the expanded viewport, or all keys
+            when no camera is available.
+        """
+        if self.config is None:
+            return set()
 
         camera = self.one_or_none("@Camera2D", scope="global")
         if camera is None:
-            return all_keys
+            return set(self.config.chunks)
 
         left, top, right, bottom = camera.get_view_rect()
+        if right <= left or bottom <= top:
+            return set()
         px = self.chunk_size * self.tile_size
         if px <= 0:
-            return all_keys
-        margin = int(self.margin_chunks)
+            return set(self.config.chunks)
+        margin = max(0, int(self.margin_chunks))
 
         # Oversized tiles anchor bottom-left: their image spills upward and
         # to the right of the cell. The owning chunk can sit outside the
         # viewport while its image is still visible, so the scan range is
         # widened by the largest overhang (rounded up in chunk units).
         over_x, over_y = self._max_overhang
-        extra_cx = int(-(-over_x // px)) if over_x > 0 else 0
-        extra_cy = int(-(-over_y // px)) if over_y > 0 else 0
+        extra_cx = ceil(over_x / px) if over_x > 0 else 0
+        extra_cy = ceil(over_y / px) if over_y > 0 else 0
 
         start_cx = int(left // px) - margin - extra_cx
-        end_cx = int(right // px) + margin
+        end_cx = ceil(right / px) - 1 + margin
         start_cy = int(top // px) - margin
-        end_cy = int(bottom // px) + margin + extra_cy
+        end_cy = ceil(bottom / px) - 1 + margin + extra_cy
 
-        visible: set[ChunkKey] = set()
-        for cx in range(start_cx, end_cx + 1):
-            for cy in range(start_cy, end_cy + 1):
-                visible.add(f"{cx},{cy}")
-        return visible
+        return {
+            key
+            for key, chunk in self.config.chunks.items()
+            if start_cx <= chunk.chunk_x <= end_cx
+            and start_cy <= chunk.chunk_y <= end_cy
+        }
 
     def _submit_chunk(
         self,
@@ -1068,7 +1092,8 @@ class TileMapNode(NodeUnit):
             return
 
         tex = self._baked_render[bake_key].texture
-        source = (0.0, 0.0, float(tex.width), float(-tex.height))
+        # Signed source extents start the vertical flip at the bottom edge.
+        source = (0.0, float(tex.height), float(tex.width), float(-tex.height))
         dest = (float(world_x), float(world_y), float(px), float(px))
 
         meta = self._layer_meta(layer_id)
@@ -1132,7 +1157,7 @@ class TileMapNode(NodeUnit):
             if gid == 0:
                 continue
             entry = self._gid_map.get(gid)
-            if entry is None or not entry.is_oversized(self.tile_size):
+            if entry is None or not entry.oversized:
                 continue
             col = i % cs
             row = i // cs

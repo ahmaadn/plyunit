@@ -1,21 +1,14 @@
-"""Example: Physics Engine Demo
+"""Demonstrate Plyunit physics bodies, sensors, and collision filtering.
 
-Demonstrasi lengkap fitur physics engine Plyunit:
-1. Physics setup dengan gravity
-2. PhysicsBody dynamic (falling boxes & circles)
-3. PhysicsBody kinematic (moving platform)
-4. StaticBody via QuadTree (floor + walls)
-5. PhysicsArea sensor (trigger zone)
-6. Collision mask/layer filtering
-7. PhysicsDebugDraw component (plug & play)
-8. Spawning & sleeping visualization
+Includes gravity, dynamic boxes and circles, a kinematic platform, static
+geometry, trigger areas, collision masks, and sleeping-body visualization.
 
 Controls:
-- Klik kiri: Spawn box
-- Klik kanan: Spawn circle
-- Spasi: Toggle gravity (0 ↔ 900)
-- D: Toggle debug draw
-- R: Reset scene
+    Left click: Spawn a box.
+    Right click: Spawn a circle.
+    Space: Toggle gravity between zero and 900.
+    D: Toggle debug drawing.
+    R: Reset the scene.
 """
 
 import math
@@ -24,6 +17,7 @@ import random
 import pyray as pr
 
 import plyunit as pu
+from plyunit.backends.ports.renderer import ICanvas2D
 
 # ======================================================================
 # Layer Constants (Godot-style bitmask bits)
@@ -40,7 +34,7 @@ LAYER_TRIGGER = 3  # bit 3: trigger zones
 
 
 class FallingBox(pu.Component):
-    """Box yang jatuh dan bertabrakan."""
+    """Draw a falling box with collision response."""
 
     def __init__(
         self, x: float, y: float, w: float = 32, h: float = 32, color_idx: int = 0
@@ -49,7 +43,7 @@ class FallingBox(pu.Component):
         self.physics = pu.PhysicsBody.dynamic(mass=1.0, name="FallingBox")
         self.add_shape(pu.BoxShape(width=w, height=h, friction=0.6, elasticity=0.3))
 
-        # Collision: berada di layer PLAYER, detect WORLD + PLAYER + ENEMY
+        # Belong to PLAYER; detect WORLD, PLAYER, and ENEMY.
         self.physics.filter.set_layer_bit(LAYER_PLAYER, True)
         self.physics.filter.set_mask_bit(LAYER_WORLD, True)
         self.physics.filter.set_mask_bit(LAYER_PLAYER, True)
@@ -84,12 +78,12 @@ class FallingBox(pu.Component):
     def angular_velocity(self, value: float) -> None:
         self.physics.angular_velocity = value
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         world = self.unit.world_transform_lerp()
         hw, hh = self._w / 2, self._h / 2
         color = self._color
         if self.physics.is_sleeping:
-            # Dim color saat sleeping
+            # Dim sleeping bodies.
             color = (color[0] // 2, color[1] // 2, color[2] // 2, color[3])
 
         canvas.draw_rectangle(
@@ -102,14 +96,14 @@ class FallingBox(pu.Component):
 
 
 class FallingCircle(pu.Component):
-    """Circle yang jatuh dan memantul."""
+    """Draw a falling, bouncing circle."""
 
     def __init__(self, x: float, y: float, radius: float = 16) -> None:
         super().__init__(name="FallingCircleRenderer")
         self.physics = pu.PhysicsBody.dynamic(mass=0.8, name="FallingCircle")
         self.add_shape(pu.CircleShape(radius=radius, friction=0.4, elasticity=0.6))
 
-        # Collision: berada di layer ENEMY, detect WORLD + PLAYER + ENEMY
+        # Belong to ENEMY; detect WORLD, PLAYER, and ENEMY.
         self.physics.filter.set_layer_bit(LAYER_ENEMY, True)
         self.physics.filter.set_mask_bit(LAYER_WORLD, True)
         self.physics.filter.set_mask_bit(LAYER_PLAYER, True)
@@ -141,7 +135,7 @@ class FallingCircle(pu.Component):
     def angular_velocity(self, value: float) -> None:
         self.physics.angular_velocity = value
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         world = self.unit.world_transform_lerp()
         color = self._color
         if self.physics.is_sleeping:
@@ -165,16 +159,16 @@ class FallingCircle(pu.Component):
 
 
 class MovingPlatform(pu.Component):
-    """Platform kinematic yang bergerak horizontal."""
+    """Draw a horizontally moving kinematic platform."""
 
     def __init__(self, x: float, y: float, w: float = 120, h: float = 16) -> None:
         super().__init__(name="MovingPlatformRenderer")
         self.physics = pu.PhysicsBody.kinematic(name="MovingPlatform")
         self.add_shape(pu.BoxShape(width=w, height=h, friction=0.8, elasticity=0.1))
 
-        # Layer: WORLD agar body lain bisa landing
+        # Other bodies can land on the WORLD layer.
         self.physics.filter.set_layer_bit(LAYER_WORLD, True)
-        self.physics.filter.mask = 0  # Kinematic tidak perlu detect apapun
+        self.physics.filter.mask = 0  # The platform does not detect other bodies.
 
         self._w = w
         self._h = h
@@ -198,7 +192,7 @@ class MovingPlatform(pu.Component):
         new_x = self._center_x + math.sin(self._time * self._speed) * self._amplitude
         self.unit.transform.set_position(new_x, self.unit.transform.local.position[1])
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         world = self.unit.world_transform_lerp()
         hw, hh = self._w / 2, self._h / 2
         canvas.draw_rectangle(
@@ -211,14 +205,14 @@ class MovingPlatform(pu.Component):
 
 
 class TriggerZone(pu.Component):
-    """Sensor zone yang mendeteksi body masuk/keluar."""
+    """Visualize bodies entering and leaving a sensor zone."""
 
     def __init__(self, x: float, y: float, w: float = 80, h: float = 80) -> None:
         super().__init__(name="TriggerZoneRenderer")
         self.area = pu.PhysicsArea.sensor(name="TriggerZone")
         self.add_shape(pu.BoxShape(width=w, height=h))
 
-        # Layer & mask: detect player dan enemy
+        # Detect players and enemies.
         self.area.filter.set_layer_bit(LAYER_TRIGGER, True)
         self.area.filter.set_mask_bit(LAYER_PLAYER, True)
         self.area.filter.set_mask_bit(LAYER_ENEMY, True)
@@ -250,11 +244,11 @@ class TriggerZone(pu.Component):
     def update(self, dt: float) -> None:
         self._pulse += dt * 3.0
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         world = self.unit.world_transform_lerp()
         hw, hh = self._w / 2, self._h / 2
 
-        # Pulse effect saat ada body di dalam
+        # Pulse while a body is inside.
         alpha = 40
         if self._body_count > 0:
             alpha = int(40 + abs(math.sin(self._pulse)) * 60)
@@ -288,18 +282,18 @@ class TriggerZone(pu.Component):
 
 
 class HUD(pu.NodeUnit):
-    """Tampilan informasi di atas layar."""
+    """Display physics information above the scene."""
 
     def __init__(self) -> None:
         super().__init__(name="HUD")
-        self.layer = 100  # Render di atas physics
+        self.layer = 100  # Draw above physics objects.
         self._debug_enabled = True
         self._gravity_on = True
 
     def on_ready(self) -> None:
         self._physics = self.one_or_none("Physics", scope="global")
 
-    def draw(self, canvas: pu.Canvas) -> None:
+    def draw(self, canvas: ICanvas2D) -> None:
         if self._physics is None:
             return
 
@@ -355,8 +349,6 @@ class PhysicsScene(pu.SceneUnit):
         self._gravity_on = True
 
     def on_load(self) -> None:
-        # Buat physics service
-
         self._gravity_on = True
 
         # Floor — static body via QuadTree
@@ -415,7 +407,7 @@ class PhysicsScene(pu.SceneUnit):
         trigger.add_component(TriggerZone(400, 500, 100, 60))
         self.root.attach(trigger)
 
-        # Spawn beberapa initial objects
+        # Spawn initial objects.
         for i in range(5):
             box = pu.NodeUnit(name="FallingBox")
             box.add_component(
@@ -459,7 +451,7 @@ class PhysicsScene(pu.SceneUnit):
             self._physics.clear_statics()
 
     def update(self, dt: float) -> None:
-        # Physics di-step otomatis oleh Physics.on_attach (init).
+        # Physics advances automatically through its lifecycle hooks.
         # Input handling
         self._handle_input(dt)
 
@@ -471,7 +463,7 @@ class PhysicsScene(pu.SceneUnit):
         # Spawn box (edges auto-gated to first fixed substep)
         if mouse.is_pressed("left"):
             mx, my = mouse.x, mouse.y
-            if my > 80:  # Tidak spawn di area HUD
+            if my > 80:  # Keep the HUD area clear of newly spawned bodies.
                 box = pu.NodeUnit(name="FallingBox")
                 box_renderer = box.add_component(
                     FallingBox(
@@ -548,7 +540,7 @@ class PhysicsApp(pu.App):
         _ = dt
         self.renderer.reset_frame()
         self.window.begin_drawing()
-        self.window.clear_background((245, 245, 245, 255))
+        self.window.clear_background((25, 25, 35, 255))
         self.scene_manager.render(self.renderer)
         self.renderer.flush_all()
         self.window.end_drawing()
@@ -561,7 +553,6 @@ def main():
             title="Plyunit Physics Demo",
             window_width=800,
             window_height=600,
-            background_color=pr.Color(25, 25, 35, 255),
             physics=pu.PhysicsConfig(
                 enabled=True,
                 gravity=(0, 900),

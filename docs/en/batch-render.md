@@ -39,13 +39,16 @@ is not a strict painter-order guarantee on those layers.
 | runs | int32 | `(run_count, 3)` → `(start, count, tex_id)` |
 
 Default capacity: **16384** (`MAX_SPRITES` / `max_sprites`).
+`tex_id` is the batch adapter's numeric GPU ID; a texture handle's
+`texture_id` is instead a logical string asset ID. `IUnifiedBufferBatch`
+resolves the numeric ID without exposing raw resources to the renderer.
 
 ## C / plyunit-native
 
 - Package: **`plyunit-native`**
 - Module: `plyunit._plyunit_batch`
 - API: `ubr_init` / `ubr_submit_frame` / `ubr_shutdown` / `set_rlgl`
-- Wiring: `init` → `get_batching_backend()` → `Renderer(ubr=…)`
+- Wiring: `plyunit._bootstrap.init` selects adapters → `Renderer(canvas=…, ubr=…)` → `App.init` opens the window and sets up the camera → `Renderer.init` initializes UBR
 
 ```bash
 uv sync --package plyunit --extra raylib --extra native
@@ -58,25 +61,29 @@ uv sync --package plyunit --extra raylib --extra native
 
 ## Bunny performance targets
 
-Primary acceptance: flat `render_batch` (not 8k NodeUnits).
+Primary acceptance: flat `render_batch` (not 8k NodeUnits), with
+**SpatialIndex OFF**. Run the benchmark script directly from the repository
+root; there is no bunny console entry point. `--pass-ratio 1.0` enforces the
+exact target (the default `strict` profile allows a 0.95 ratio).
 
 ```bash
-# 8000 @ 60 FPS strict (≥57 avg) → benchmarks/reports/bunny_8k_60_<ts>.txt
-uv run --package plyunit plyunit-bunny-benchmark \
-  --initial-bunnies 8000 --target-bunnies 8000 --max-bunnies 8000 \
-  --target-fps 60 --fps-mode capped \
-  --warmup-seconds 1 --stability-seconds 10 --duration-seconds 0 \
-  --auto-stop-on-target --profile strict \
-  --report-file bunny_8k_60.txt --no-overlay
+# 8000 sprites @ >=60 FPS
+uv run python benchmarks/bunny_benchmark.py \
+  --bunnies 8000 --target-bunnies 8000 --max-bunnies 8000 \
+  --target-fps 60 --fps-mode capped --duration-seconds 10 \
+  --profile strict --pass-ratio 1.0 \
+  --report-file bunny_8k_60.txt --no-overlay --no-keyboard-controls
 
-# 10000 @ 30 FPS strict (≥28.5 avg)
-uv run --package plyunit plyunit-bunny-benchmark \
-  --initial-bunnies 10000 --target-bunnies 10000 --max-bunnies 10000 \
-  --target-fps 30 --fps-mode capped \
-  --warmup-seconds 1 --stability-seconds 10 --duration-seconds 0 \
-  --auto-stop-on-target --profile strict \
-  --report-file bunny_10k_30.txt --no-overlay
+# 10000 sprites @ >=30 FPS
+uv run python benchmarks/bunny_benchmark.py \
+  --bunnies 10000 --target-bunnies 10000 --max-bunnies 10000 \
+  --target-fps 30 --fps-mode capped --duration-seconds 10 \
+  --profile strict --pass-ratio 1.0 \
+  --report-file bunny_10k_30.txt --no-overlay --no-keyboard-controls
 ```
+
+Each command exits non-zero if the target-phase average fails its FPS gate.
+See [perf/regression-check.md](perf/regression-check.md).
 
 All benchmark reports: `benchmarks/reports/*_<YYYYMMDD_HHMMSS>.txt`.
 
