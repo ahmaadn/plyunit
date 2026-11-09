@@ -10,7 +10,7 @@ from plyunit._enums import ShaderUniform
 from plyunit.backends.ports._unit import IServiceUnit
 from plyunit.core.types import UniformValue
 from plyunit.core.units.service_unit import ServiceUnit
-from plyunit.services.shaders import uniform_components
+from plyunit.services.shaders.uniform import uniform_components
 
 from .handler import Shader
 

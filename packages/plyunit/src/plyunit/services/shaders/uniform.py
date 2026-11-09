@@ -1,5 +1,3 @@
-"""Backend-neutral validation of numeric shader uniform values."""
-
 from __future__ import annotations
 
 import math
@@ -8,6 +6,9 @@ from numbers import Integral, Real
 
 from plyunit._enums import ShaderUniform
 from plyunit.core.types import UniformValue
+
+__all__ = ("uniform_components",)
+
 
 _COMPONENT_COUNTS = {
     ShaderUniform.FLOAT: 1,
@@ -89,6 +90,3 @@ def uniform_components(
             )
         integers.append(integer)
     return tuple(integers)
-
-
-__all__ = ("uniform_components",)

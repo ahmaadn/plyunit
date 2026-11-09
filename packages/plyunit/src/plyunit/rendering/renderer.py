@@ -669,9 +669,18 @@ class Renderer(ServiceUnit):
             tex_ids[i] = texture_id(texture)
             source = sources[i] if sources is not None else None
             source = texture.source_rect if source is None else source
-            uvs[i] = resolve_uv(source, tw, th)
-            sw = abs(float(source[2]))
-            sh = abs(float(source[3]))
+            if (
+                source[0] == 0.0
+                and source[1] == 0.0
+                and source[2] == tw
+                and source[3] == th
+            ):
+                uvs[i] = (0.0, 0.0, 1.0, 1.0)
+                sw, sh = tw, th
+            else:
+                uvs[i] = resolve_uv(source, tw, th)
+                sw = abs(float(source[2]))
+                sh = abs(float(source[3]))
             scale = float(scales[i]) if scales is not None else 1.0
             sizes[i, 0] = sw * scale
             sizes[i, 1] = sh * scale

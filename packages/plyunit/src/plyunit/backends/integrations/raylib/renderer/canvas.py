@@ -338,9 +338,7 @@ def draw_circle(
                 center, radius, sector_angles[0], sector_angles[1], segments, color
             )
         elif gradient_outer is not None:
-            pr.draw_circle_gradient(
-                int(center.x), int(center.y), radius, color, gradient_outer
-            )
+            pr.draw_circle_gradient(center, radius, color, gradient_outer)
         else:
             pr.draw_circle_v(center, radius, color)
 
@@ -1034,16 +1032,7 @@ def draw_texture_region(
     dest: RectType,
 ) -> None:
     """Draw the ``source`` region of ``texture`` to ``dest`` (no rotation)."""
-    sx, sy, sw, sh = source
-    dx, dy, dw, dh = dest
-    pr.draw_texture_pro(
-        texture.raw_texture,
-        pr.Rectangle(sx, sy, sw, sh),
-        pr.Rectangle(dx, dy, dw, dh),
-        pr.Vector2(0, 0),
-        0.0,
-        pr.WHITE,
-    )
+    draw_texture(texture=texture, source=source, dest=dest)
 
 
 def _raw_texture_of(target: RenderTexture | Texture2D) -> pr.Texture:

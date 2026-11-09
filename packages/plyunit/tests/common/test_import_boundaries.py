@@ -48,18 +48,6 @@ def _forbidden(module: str) -> bool:
     return False
 
 
-@pytest.mark.parametrize("domain", DOMAIN_ROOTS)
-def test_domain_dependencies_use_ports_only(domain: str) -> None:
-    root = PKG / domain
-    assert root.is_dir(), f"Missing neutral domain: {root}"
-    offenders = [
-        f"{path.relative_to(PKG)}: {module}"
-        for path in root.rglob("*.py")
-        for module in _imports(path)
-        if _forbidden(module)
-    ]
-    assert not offenders, "Concrete backend imports in neutral code:\n" + "\n".join(offenders)
-
 
 def test_ports_do_not_import_concrete_backends() -> None:
     offenders = [

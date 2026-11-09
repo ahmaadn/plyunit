@@ -15,6 +15,7 @@ class FakeColor:
         self.b = int(b)
         self.a = int(a)
 
+
 class FakeVector2:
     def __init__(self, x=0.0, y=0.0):
         if isinstance(x, tuple):
@@ -22,12 +23,14 @@ class FakeVector2:
         self.x = float(x)
         self.y = float(y)
 
+
 class FakeRectangle:
     def __init__(self, x: float, y: float, width: float, height: float):
         self.x = float(x)
         self.y = float(y)
         self.width = float(width)
         self.height = float(height)
+
 
 def test_canvas_draw_circle_variations(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, list] = {
@@ -43,7 +46,9 @@ def test_canvas_draw_circle_variations(monkeypatch: pytest.MonkeyPatch) -> None:
         Color=FakeColor,
         Rectangle=FakeRectangle,
         Vector2=FakeVector2,
-        draw_circle_sector_lines=lambda *args: calls["draw_circle_sector_lines"].append(args),
+        draw_circle_sector_lines=lambda *args: calls["draw_circle_sector_lines"].append(
+            args
+        ),
         draw_circle_sector=lambda *args: calls["draw_circle_sector"].append(args),
         draw_circle_gradient=lambda *args: calls["draw_circle_gradient"].append(args),
         draw_circle_lines_v=lambda *args: calls["draw_circle_lines_v"].append(args),
@@ -53,7 +58,9 @@ def test_canvas_draw_circle_variations(monkeypatch: pytest.MonkeyPatch) -> None:
     canvas = Canvas
 
     # Sector outline
-    canvas.draw_circle(center=(0, 0), radius=10, sector_angles=(0, 90), outline_only=True)
+    canvas.draw_circle(
+        center=(0, 0), radius=10, sector_angles=(0, 90), outline_only=True
+    )
     assert len(calls["draw_circle_sector_lines"]) == 1
 
     # Sector solid
@@ -63,12 +70,15 @@ def test_canvas_draw_circle_variations(monkeypatch: pytest.MonkeyPatch) -> None:
     # Gradient
     canvas.draw_circle(center=(0, 0), radius=10, gradient_outer=(255, 0, 0, 255))
     assert len(calls["draw_circle_gradient"]) == 1
-    assert len(calls["draw_circle_gradient"][0]) == 5
-    assert calls["draw_circle_gradient"][0][:3] == (0, 0, 10)
+    assert len(calls["draw_circle_gradient"][0]) == 4
+    center, radius = calls["draw_circle_gradient"][0][:2]
+    assert isinstance(center, FakeVector2)
+    assert (center.x, center.y, radius) == (0, 0, 10)
 
     # Outline only
     canvas.draw_circle(center=(0, 0), radius=10, outline_only=True)
     assert len(calls["draw_circle_lines_v"]) == 1
+
 
 def test_canvas_draw_rectangle_variations(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, list] = {
@@ -87,13 +97,25 @@ def test_canvas_draw_rectangle_variations(monkeypatch: pytest.MonkeyPatch) -> No
         Color=FakeColor,
         Rectangle=FakeRectangle,
         Vector2=FakeVector2,
-        draw_rectangle_gradient_v=lambda *args: calls["draw_rectangle_gradient_v"].append(args),
-        draw_rectangle_gradient_h=lambda *args: calls["draw_rectangle_gradient_h"].append(args),
-        draw_rectangle_gradient_ex=lambda *args: calls["draw_rectangle_gradient_ex"].append(args),
-        draw_rectangle_rounded_lines_ex=lambda *args: calls["draw_rectangle_rounded_lines_ex"].append(args),
-        draw_rectangle_lines_ex=lambda *args: calls["draw_rectangle_lines_ex"].append(args),
+        draw_rectangle_gradient_v=lambda *args: calls[
+            "draw_rectangle_gradient_v"
+        ].append(args),
+        draw_rectangle_gradient_h=lambda *args: calls[
+            "draw_rectangle_gradient_h"
+        ].append(args),
+        draw_rectangle_gradient_ex=lambda *args: calls[
+            "draw_rectangle_gradient_ex"
+        ].append(args),
+        draw_rectangle_rounded_lines_ex=lambda *args: calls[
+            "draw_rectangle_rounded_lines_ex"
+        ].append(args),
+        draw_rectangle_lines_ex=lambda *args: calls["draw_rectangle_lines_ex"].append(
+            args
+        ),
         draw_rectangle_lines=lambda *args: calls["draw_rectangle_lines"].append(args),
-        draw_rectangle_rounded=lambda *args: calls["draw_rectangle_rounded"].append(args),
+        draw_rectangle_rounded=lambda *args: calls["draw_rectangle_rounded"].append(
+            args
+        ),
     )
 
     monkeypatch.setattr(canvas_module, "pr", fake_pr)
@@ -111,7 +133,9 @@ def test_canvas_draw_rectangle_variations(monkeypatch: pytest.MonkeyPatch) -> No
     canvas.draw_rectangle(rect=(0, 0, 10, 10), gradient_ex=(c1, c2, c3, c4))
     assert len(calls["draw_rectangle_gradient_ex"]) == 1
 
-    canvas.draw_rectangle(rect=(0, 0, 10, 10), outline_only=True, roundness=0.5, thickness=2.0)
+    canvas.draw_rectangle(
+        rect=(0, 0, 10, 10), outline_only=True, roundness=0.5, thickness=2.0
+    )
     assert len(calls["draw_rectangle_rounded_lines_ex"]) == 1
 
     canvas.draw_rectangle(rect=(0, 0, 10, 10), outline_only=True, thickness=2.0)
@@ -123,7 +147,10 @@ def test_canvas_draw_rectangle_variations(monkeypatch: pytest.MonkeyPatch) -> No
     canvas.draw_rectangle(rect=(0, 0, 10, 10), roundness=0.5)
     assert len(calls["draw_rectangle_rounded"]) == 1
 
-def test_canvas_draw_ellipse_ring_triangle_poly(monkeypatch: pytest.MonkeyPatch) -> None:
+
+def test_canvas_draw_ellipse_ring_triangle_poly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: dict[str, list] = {
         "draw_ellipse_lines": [],
         "draw_ellipse": [],
@@ -192,6 +219,7 @@ def test_canvas_draw_ellipse_ring_triangle_poly(monkeypatch: pytest.MonkeyPatch)
     assert len(calls["draw_poly_lines"]) == 1
     assert len(calls["draw_poly"]) == 1
 
+
 def test_canvas_draw_pixel(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, list] = {
         "draw_pixel": [],
@@ -216,6 +244,7 @@ def test_canvas_draw_pixel(monkeypatch: pytest.MonkeyPatch) -> None:
     # pyrefly: ignore [bad-argument-type]
     canvas.draw_pixel(pos=FakeVector2(1, 2))
     assert len(calls["draw_pixel_v"]) == 2
+
 
 def test_canvas_gpu_state_methods(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: dict[str, list] = {

@@ -147,7 +147,10 @@ def init[T: App](
     app.camera = _service(
         app,
         camera,
-        lambda: bindings["Camera2D"](size=(cfg.window_width, cfg.window_height)),
+        lambda: bindings["Camera2D"](
+            size=(cfg.window_width, cfg.window_height),
+            position=(cfg.window_width / 2.0, cfg.window_height / 2.0),
+        ),
     )
     app.init(cfg)
     if cfg.physics.enabled:

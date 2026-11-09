@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
-from plyunit.backends.integrations.raylib.handler import RenderTexture, Shader, Texture2D
+from plyunit.backends.integrations.raylib.handler import (
+    RenderTexture,
+    Shader,
+    Texture2D,
+)
 import plyunit.backends.integrations.raylib.renderer.canvas as Canvas
 
 
@@ -118,9 +123,7 @@ def test_canvas_many_draw_paths(fake_pr):
     Canvas.draw_pixel(pos=(1, 2), color=(255, 0, 0, 255))
     Canvas.draw_line(start=(0, 0), end=(1, 1), color=(0, 0, 0, 255), thickness=2)
     Canvas.draw_circle(center=(0, 0), radius=5, color=(1, 1, 1, 255))
-    Canvas.draw_circle(
-        center=(0, 0), radius=5, color=(1, 1, 1, 255), outline_only=True
-    )
+    Canvas.draw_circle(center=(0, 0), radius=5, color=(1, 1, 1, 255), outline_only=True)
     Canvas.draw_ellipse(center=(0, 0), radius_h=3, radius_v=2, color=(1, 1, 1, 255))
     Canvas.draw_ellipse(
         center=(0, 0), radius_h=3, radius_v=2, color=(1, 1, 1, 255), outline_only=True
@@ -134,12 +137,8 @@ def test_canvas_many_draw_paths(fake_pr):
         color=(1, 1, 1, 255),
     )
     Canvas.draw_rectangle(rect=(0, 0, 10, 10), color=(1, 1, 1, 255))
-    Canvas.draw_rectangle(
-        rect=(0, 0, 10, 10), color=(1, 1, 1, 255), outline_only=True
-    )
-    Canvas.draw_triangle(
-        v1=(0, 0), v2=(1, 0), v3=(0, 1), color=(1, 1, 1, 255)
-    )
+    Canvas.draw_rectangle(rect=(0, 0, 10, 10), color=(1, 1, 1, 255), outline_only=True)
+    Canvas.draw_triangle(v1=(0, 0), v2=(1, 0), v3=(0, 1), color=(1, 1, 1, 255))
     Canvas.draw_triangle(
         v1=(0, 0), v2=(1, 0), v3=(0, 1), color=(1, 1, 1, 255), outline_only=True
     )
@@ -155,7 +154,9 @@ def test_canvas_many_draw_paths(fake_pr):
     Canvas.draw_texture(texture=tex, pos=(0, 0), scale=2.0, rotation=45)
     Canvas.draw_texture(
         # pyrefly: ignore [bad-argument-type]
-        texture=tex, dest=(0, 0, 32, 32), source=(0, 0, 16, 16)
+        texture=tex,
+        dest=(0, 0, 32, 32),
+        source=(0, 0, 16, 16),
     )
     Canvas.begin_scissor_mode(0, 0, 100, 100)
     Canvas.end_scissor_mode()
@@ -168,3 +169,42 @@ def test_canvas_many_draw_paths(fake_pr):
     Canvas.begin_texture_mode(RenderTexture(SimpleNamespace(id=2)))
     Canvas.end_texture_mode()
     assert len(calls) > 10
+
+
+@pytest.mark.parametrize(
+    ("source", "normalized"),
+    [
+        ((32, 32, -16, 16), (16, 32, -16, 16)),
+        ((32, 32, 16, -16), (32, 16, 16, -16)),
+        ((32, 32, -16, -16), (16, 16, -16, -16)),
+        ((16, 24, 16, 8), (16, 24, 16, 8)),
+    ],
+    ids=["negative-x", "negative-y", "negative-xy", "positive-subregion"],
+)
+def test_canvas_texture_region_matches_source_normalization(
+    fake_pr, source, normalized
+):
+    raw_texture: Any = SimpleNamespace(id=1, width=64, height=64, format=7)
+    texture = Texture2D.from_raw(raw_texture)
+    dest = (3, 5, 24, 48)
+    Canvas.draw_texture(texture=texture, source=source, dest=dest)
+    Canvas.draw_texture_region(texture, source, dest)
+
+    assert len(fake_pr) == 2
+    for raw, native_source, native_dest, origin, rotation, tint in fake_pr:
+        assert raw is texture.raw_texture
+        assert (
+            native_source.x,
+            native_source.y,
+            native_source.width,
+            native_source.height,
+        ) == normalized
+        assert (
+            native_dest.x,
+            native_dest.y,
+            native_dest.width,
+            native_dest.height,
+        ) == dest
+        assert (origin.x, origin.y) == (0, 0)
+        assert rotation == 0.0
+        assert tint is Canvas.pr.WHITE

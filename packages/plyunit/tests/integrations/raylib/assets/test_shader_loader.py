@@ -12,7 +12,7 @@ from plyunit._enums import ShaderUniform
 from plyunit.backends.integrations.raylib.handler import Shader
 from plyunit.backends.integrations.raylib.shader import Shaders
 from plyunit.core.units.unit_registry import UnitRegistry
-from plyunit.services.shaders import uniform_components
+from plyunit.services.shaders.uniform import uniform_components
 
 
 @pytest.fixture()

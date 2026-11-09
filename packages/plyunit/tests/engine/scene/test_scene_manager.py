@@ -22,7 +22,7 @@ class CountingScene(pu.SceneUnit):
 def test_scene_manager_emits_queue_and_applied_signals() -> None:
     manager = scene_manager_module.SceneManager()
 
-    queued: list[tuple[scene_manager_module.TransitionType, pu.SceneUnit | None]] = []
+    queued: list[tuple[scene_manager_module.TransitionKind, pu.SceneUnit | None]] = []
     applied: list[scene_manager_module.SceneTransitionEvent] = []
 
     manager.on_transition_queued.connect(lambda kind, unit: queued.append((kind, unit)))
@@ -34,7 +34,7 @@ def test_scene_manager_emits_queue_and_applied_signals() -> None:
     manager.push(first)
 
     assert manager.current is None
-    assert queued == [(scene_manager_module.TransitionType.PUSH, first)]
+    assert queued == [(scene_manager_module.TransitionKind.PUSH, first)]
 
     manager.apply_pending()
 
@@ -42,7 +42,7 @@ def test_scene_manager_emits_queue_and_applied_signals() -> None:
     assert first.load_count == 1
 
     first_event = applied[-1]
-    assert first_event.kind is scene_manager_module.TransitionType.PUSH
+    assert first_event.kind is scene_manager_module.TransitionKind.PUSH
     assert first_event.previous is None
     assert first_event.current is first
     assert first_event.depth == 1
@@ -55,7 +55,7 @@ def test_scene_manager_emits_queue_and_applied_signals() -> None:
     assert second.load_count == 1
 
     second_event = applied[-1]
-    assert second_event.kind is scene_manager_module.TransitionType.CHANGE
+    assert second_event.kind is scene_manager_module.TransitionKind.CHANGE
     assert second_event.previous is first
     assert second_event.current is second
     assert second_event.depth == 1
@@ -67,7 +67,7 @@ def test_scene_manager_emits_queue_and_applied_signals() -> None:
     assert second.unload_count == 1
 
     third_event = applied[-1]
-    assert third_event.kind is scene_manager_module.TransitionType.POP
+    assert third_event.kind is scene_manager_module.TransitionKind.POP
     assert third_event.previous is second
     assert third_event.current is None
     assert third_event.depth == 0
@@ -83,8 +83,8 @@ def test_scene_controller_fade_change_and_signals() -> None:
     controller = scene_manager_module.SceneController(duration=0.1)
     manager.set_transition_behavior(controller)
 
-    started: list[scene_manager_module.TransitionType] = []
-    midpoint: list[tuple[scene_manager_module.TransitionType, pu.SceneUnit | None]] = []
+    started: list[scene_manager_module.TransitionKind] = []
+    midpoint: list[tuple[scene_manager_module.TransitionKind, pu.SceneUnit | None]] = []
     finished: list[pu.SceneUnit | None] = []
 
     manager.on_transition_started.connect(lambda kind: started.append(kind))
@@ -111,8 +111,8 @@ def test_scene_controller_fade_change_and_signals() -> None:
     assert current_scene.unload_count == 1
     assert next_scene.load_count == 1
 
-    assert started == [scene_manager_module.TransitionType.CHANGE]
-    assert midpoint == [(scene_manager_module.TransitionType.CHANGE, next_scene)]
+    assert started == [scene_manager_module.TransitionKind.CHANGE]
+    assert midpoint == [(scene_manager_module.TransitionKind.CHANGE, next_scene)]
 
     manager.update(0.1)
 
@@ -127,15 +127,15 @@ def test_scene_controller_requires_scene_factory_for_non_pop() -> None:
     manager.set_transition_behavior(controller)
 
     with pytest.raises(ValueError, match="scene_factory wajib"):
-        manager.request_transition(scene_manager_module.TransitionType.PUSH)
+        manager.request_transition(scene_manager_module.TransitionKind.PUSH)
 
     with pytest.raises(ValueError, match="scene_factory wajib"):
-        manager.request_transition(scene_manager_module.TransitionType.CHANGE)
+        manager.request_transition(scene_manager_module.TransitionKind.CHANGE)
 
     with pytest.raises(ValueError, match="scene_factory wajib"):
-        manager.request_transition(scene_manager_module.TransitionType.REPLACE_ALL)
+        manager.request_transition(scene_manager_module.TransitionKind.REPLACE_ALL)
 
-    assert manager.request_transition(scene_manager_module.TransitionType.POP) is True
+    assert manager.request_transition(scene_manager_module.TransitionKind.POP) is True
 
 
 def test_replace_all_unloads_stack_from_top_to_bottom() -> None:

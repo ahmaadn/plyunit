@@ -267,6 +267,7 @@ class Assets(ServiceUnit):
         super().__init__(name="Assets", tags={"service", "asset_manager", "assets"})
 
         self._textures: dict[str, Texture2D] = {}
+        self._texture_owners: dict[int, str] = {}
         self._regions: dict[str, set[str]] = {}
         self._sheet_regions: dict[str, set[str]] = {}
         self._region_sheets: dict[str, str] = {}
@@ -339,6 +340,7 @@ class Assets(ServiceUnit):
         """Unload all assets and clear configuration data."""
         for asset_id in list(self._textures):
             self.unload_asset(asset_id)
+        self._texture_owners.clear()
         self._regions.clear()
         self._sheet_regions.clear()
         self._region_sheets.clear()
@@ -374,6 +376,7 @@ class Assets(ServiceUnit):
         if sheet_id is not None:
             self._sheet_regions.get(sheet_id, set()).discard(asset_id)
         if handle._is_root:
+            self._texture_owners.pop(self._texture_key(handle.raw_texture), None)
             self._regions.pop(asset_id, None)
             self._atlases.discard(asset_id)
             try:
@@ -399,22 +402,17 @@ class Assets(ServiceUnit):
         asset_id = handle.texture_id
         self._check_asset_id(asset_id)
         existing = self._textures.get(asset_id)
+        texture_key = self._texture_key(handle.raw_texture)
         if handle._is_root:
             if not handle._owns_texture:
                 raise ValueError("A borrowed texture cannot own a cache entry")
-            for owner_id, owner in self._textures.items():
-                if (
-                    owner._is_root
-                    and owner_id != asset_id
-                    and self._texture_key(owner.raw_texture)
-                    == self._texture_key(handle.raw_texture)
-                ):
-                    raise ValueError(f"Texture is already owned by asset '{owner_id}'")
+            owner_id = self._texture_owners.get(texture_key)
+            if owner_id is not None and owner_id != asset_id:
+                raise ValueError(f"Texture is already owned by asset '{owner_id}'")
             if (
                 existing is not None
                 and existing._is_root
-                and self._texture_key(existing.raw_texture)
-                == self._texture_key(handle.raw_texture)
+                and self._texture_key(existing.raw_texture) == texture_key
             ):
                 self._textures[asset_id] = handle
                 return
@@ -423,14 +421,14 @@ class Assets(ServiceUnit):
             if (
                 parent is None
                 or not parent._is_root
-                or self._texture_key(parent.raw_texture)
-                != self._texture_key(handle.raw_texture)
+                or self._texture_key(parent.raw_texture) != texture_key
             ):
                 raise ValueError(f"Region '{asset_id}' requires a live root owner")
         if existing is not None:
             self.unload_asset(asset_id)
         self._textures[asset_id] = handle
         if handle._is_root:
+            self._texture_owners[texture_key] = asset_id
             self._regions.setdefault(asset_id, set())
         else:
             self._regions.setdefault(handle.parent_id, set()).add(asset_id)
@@ -1191,7 +1189,9 @@ class Assets(ServiceUnit):
             )
             self._regions[page_id].add(root_id)
             delta_map[root_id] = (dx, dy)
-            texture_map[self._texture_key(old.raw_texture)] = (page, dx, dy)
+            texture_key = self._texture_key(old.raw_texture)
+            texture_map[texture_key] = (page, dx, dy)
+            self._texture_owners.pop(texture_key, None)
 
             for region_id in self._regions.pop(root_id, ()):
                 self._textures[region_id] = page.derive(

@@ -63,6 +63,10 @@ def parse_rect(region_id: str, region_data: Any) -> RectType:
     Raises:
         ValueError: If the rectangle does not contain four finite numbers.
     """
+    if isinstance(region_data, Mapping):
+        if "rect" not in region_data:
+            raise ValueError(f"Region '{region_id}' must contain a rect")
+        region_data = region_data["rect"]
     if not isinstance(region_data, (list, tuple)):
         raise ValueError(f"Region '{region_id}' rect must be a list or tuple")
     if len(region_data) != 4:

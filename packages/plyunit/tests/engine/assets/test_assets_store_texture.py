@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 
@@ -130,3 +131,86 @@ def test_stored_textures_are_atlas_packable(manager: Assets, gpu: FakeGPU) -> No
     assert manager["rect_a"].raw_texture is page.raw_texture
     assert manager["rect_b"].raw_texture is page.raw_texture
     assert [raw.name for raw in gpu.unloaded] == ["rect_a", "rect_b"]
+
+
+def test_gpu_owner_checks_remain_linear_for_bulk_storage(
+    manager: Assets, gpu: FakeGPU, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    count = 200
+    textures = {str(index): gpu.texture(str(index), 8, 8) for index in range(count)}
+    texture_key = Mock(wraps=manager._texture_key)
+    monkeypatch.setattr(manager, "_texture_key", texture_key)
+
+    manager.store_textures(textures)
+
+    assert len(manager.all_assets) == count
+    assert texture_key.call_count <= count * 3
+    assert manager._texture_owners == {
+        texture.raw_texture.id: asset_id for asset_id, texture in textures.items()
+    }
+
+
+def test_owner_index_tracks_replacement_and_reused_native_ids(
+    manager: Assets, gpu: FakeGPU
+) -> None:
+    old = gpu.texture("old", 8, 8)
+    new = gpu.texture("new", 16, 16)
+    old_id, new_id = old.raw_texture.id, new.raw_texture.id
+    manager.store_texture("shared", old)
+    manager.store_texture("shared", new)
+
+    assert manager._texture_owners == {new_id: "shared"}
+    reused = gpu.texture("reused", 8, 8)
+    reused.raw_texture.id = old_id
+    manager.store_texture("reused", reused)
+    assert manager._texture_owners == {new_id: "shared", old_id: "reused"}
+
+    manager.unload_asset("shared")
+    assert manager._texture_owners == {old_id: "reused"}
+    manager.clear_all()
+    assert manager._texture_owners == {}
+
+
+def test_owner_index_rejects_duplicate_without_replacing_an_existing_asset(
+    manager: Assets, gpu: FakeGPU
+) -> None:
+    first = gpu.texture("first", 8, 8)
+    second = gpu.texture("second", 8, 8)
+    manager.store_texture("first", first)
+    manager.store_texture("second", second)
+
+    with pytest.raises(ValueError, match="already owned"):
+        manager.store_texture("first", second)
+
+    assert manager["first"].raw_texture is first.raw_texture
+    assert manager["second"].raw_texture is second.raw_texture
+    assert manager._texture_owners == {
+        first.raw_texture.id: "first",
+        second.raw_texture.id: "second",
+    }
+    assert gpu.unloaded == []
+
+
+def test_owner_index_is_updated_after_atlas_repacking(
+    manager: Assets, gpu: FakeGPU
+) -> None:
+    textures = {name: gpu.texture(name, 8, 8) for name in ("a", "b")}
+    manager.store_textures(textures)
+    manager.build_texture_atlas()
+    page_id = manager["atlas"].raw_texture.id
+
+    assert manager._texture_owners == {page_id: "atlas"}
+    replacement = gpu.texture("reused", 8, 8)
+    replacement.raw_texture.id = textures["a"].raw_texture.id
+    manager.store_texture("a", replacement)
+    assert manager._texture_owners == {
+        page_id: "atlas",
+        replacement.raw_texture.id: "a",
+    }
+    assert manager.is_valid("b")
+
+    manager.unload_asset("atlas")
+    assert manager._texture_owners == {replacement.raw_texture.id: "a"}
+    assert set(manager.all_assets) == {"a"}
+    manager.clear_all()
+    assert manager._texture_owners == {}

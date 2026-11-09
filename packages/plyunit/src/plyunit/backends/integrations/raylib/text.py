@@ -21,7 +21,7 @@ from plyunit.backends.ports.text import (
 )
 from plyunit.core.types import ColorType
 from plyunit.core.units.service_unit import ServiceUnit
-from plyunit.services.text import (
+from plyunit.services.text.shape import (
     BASE_TEMPLATE_NAME,
     DEFAULT_TEMPLATE_SIZE,
     ShapeCache,

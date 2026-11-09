@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import MappingProxyType
 
 import pytest
 
@@ -71,6 +72,56 @@ def test_asset_manager_load_spritesheet(
     assert manager["tile"].raw_texture is manager["sheet"].raw_texture
     assert manager["tile"].parent_id == "sheet"
     assert manager.get_config_path_for("tile") == config
+
+
+@pytest.mark.parametrize(
+    "regions",
+    [
+        {"tile": [0, 0, 16, 16]},
+        {"tile": {"rect": [0, 0, 16, 16]}},
+        {"tile": MappingProxyType({"rect": (0, 0, 16, 16)})},
+        [{"name": "tile", "rect": [0, 0, 16, 16]}],
+    ],
+)
+def test_asset_manager_loads_supported_region_formats(
+    manager: Assets, tmp_path: Path, regions
+) -> None:
+    (tmp_path / "sheet.png").touch()
+    manager.load_from_dict({
+        "id": "sheet",
+        "type": "spritesheet",
+        "image_path": "sheet.png",
+        "regions": regions,
+    })
+    assert manager["tile"].source_rect == (0.0, 0.0, 16.0, 16.0)
+    assert manager["tile"].parent_id == "sheet"
+
+
+@pytest.mark.parametrize(
+    "region",
+    [
+        {},
+        {"rect": None},
+        {"rect": [0, 0, 16]},
+        {"rect": [0, 0, "invalid", 16]},
+        {"rect": [0, 0, float("nan"), 16]},
+        {"rect": [0, 0, float("inf"), 16]},
+    ],
+)
+def test_asset_manager_rejects_malformed_nested_region_before_upload(
+    manager: Assets, images: FakeImages, gpu: FakeGPU, tmp_path: Path, region
+) -> None:
+    (tmp_path / "sheet.png").touch()
+    with pytest.raises(ValueError):
+        manager.load_from_dict({
+            "id": "sheet",
+            "type": "spritesheet",
+            "image_path": "sheet.png",
+            "regions": {"tile": region},
+        })
+    assert images.loaded == []
+    assert gpu.upload_count == 0
+    assert manager.all_assets == {}
 
 
 def test_nested_sidecar_preserves_relative_subdirectories(

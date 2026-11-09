@@ -60,7 +60,7 @@ def test_refresh_scene_after_update():
 def _build_scene(n: int) -> tuple[SceneUnit, SpatialIndex, list[NodeUnit]]:
     scene = SceneUnit(name="Scene")
     scene.load()
-    spatial = SpatialIndex(cell_size=64.0, stats_enabled=True)
+    spatial = SpatialIndex(cell_size=64.0)
     nodes: list[NodeUnit] = []
     for i in range(n):
         node = NodeUnit(name=f"N{i}")
@@ -70,22 +70,6 @@ def _build_scene(n: int) -> tuple[SceneUnit, SpatialIndex, list[NodeUnit]]:
     scene._dispatch_update(0.016)
     return scene, spatial, nodes
 
-
-def test_incremental_dirty_count_less_than_full():
-    scene, spatial, nodes = _build_scene(n=200)
-    assert spatial.stats is not None
-    # Bootstrap dispatch already did a full rebuild.
-    assert spatial.stats.last_full_count >= 200
-
-    # Move exactly one node; incremental flush should re-insert only that one.
-    mover = nodes[7]
-    mover.transform.set_position(5000.0, 5000.0)
-    scene._dispatch_update(0.016)
-    assert spatial.stats.last_dirty_count == 1
-
-    # Full rebuild touches strictly more nodes than the single-move flush.
-    spatial.refresh_scene(scene)
-    assert spatial.stats.last_full_count > spatial.stats.last_dirty_count
 
 
 def test_attach_detach_incremental():

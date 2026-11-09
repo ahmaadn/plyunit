@@ -8,7 +8,7 @@ dependencies = ["numpy>=2.0.0", "typing-extensions>=4.16.0"]
 
 [project.optional-dependencies]
 # Host backends are optional. ImGui needs a live OpenGL context (typically raylib).
-raylib = ["raylib>=5.5.0.4"]
+raylib = ["raylib>=6.2.0.0"]
 physics = ["pymunk>=6.0.0"]
 # Prefer: uv sync --package plyunit --extra raylib --extra imgui (workspace;
 # plyunit is not published to PyPI at this time).
@@ -17,7 +17,7 @@ imgui = ["imgui-bundle>=1.92.0", "pyopengl>=3.1.0"]
 # No PLYUNIT_BUILD_NATIVE env required. Runtime fail-fast if .pyd missing.
 native = ["plyunit-native"]
 all = [
-  "raylib>=5.5.0.4",
+  "raylib>=6.2.0.0",
   "pymunk>=6.0.0",
   "imgui-bundle>=1.92.0",
   "pyopengl>=3.1.0",

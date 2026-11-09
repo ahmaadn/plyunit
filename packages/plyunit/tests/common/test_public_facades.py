@@ -32,6 +32,46 @@ def test_services_resolve_to_selected_backend_implementations() -> None:
         assert getattr(integrations, name) is getattr(raylib, name)
 
 
+
+def test_unknown_audio_service_name_does_not_resolve_backend(monkeypatch) -> None:
+    import plyunit.services.audio as audio
+
+    def unexpected_lookup(name):
+        raise AssertionError("unknown audio names must not load a backend")
+
+    monkeypatch.setattr(plyunit, "__getattr__", unexpected_lookup)
+    with pytest.raises(AttributeError, match="RemovedPlyunitApi"):
+        getattr(audio, "RemovedPlyunitApi")
+
+
+@pytest.mark.parametrize("name", ["Assets", "Image", "ImageProcessor"])
+def test_assets_service_facade_resolves_and_caches_exports(monkeypatch, name) -> None:
+    import plyunit.services.assets as assets
+
+    selected = object()
+    monkeypatch.setattr(integrations, name, selected)
+    monkeypatch.delitem(vars(assets), name, raising=False)
+    try:
+        assert getattr(assets, name) is selected
+        assert vars(assets)[name] is selected
+        assert name in assets.__all__
+        monkeypatch.setattr(integrations, name, object())
+        assert getattr(assets, name) is selected
+    finally:
+        vars(assets).pop(name, None)
+
+
+def test_unknown_assets_service_name_does_not_resolve_backend(monkeypatch) -> None:
+    import plyunit.services.assets as assets
+
+    def unexpected_lookup(name):
+        raise AssertionError("unknown assets names must not load a backend")
+
+    monkeypatch.setattr(plyunit, "__getattr__", unexpected_lookup)
+    with pytest.raises(AttributeError, match="RemovedPlyunitApi"):
+        getattr(assets, "RemovedPlyunitApi")
+
+
 def test_shared_exports_do_not_point_to_backend_implementations() -> None:
     from plyunit._enums import ShaderUniform, TextureFilter
     from plyunit.backends.ports.handler import ShaderHandle

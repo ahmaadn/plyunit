@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from plyunit.rendering.renderer import Renderer
 
 
-class TransitionType(Enum):
+class TransitionKind(Enum):
     """Kinds of scene transition supported by :class:`SceneManager`."""
 
     PUSH = auto()
@@ -32,7 +32,7 @@ class TransitionType(Enum):
 class _Pending:
     """A pending transition to be applied at the end of the frame."""
 
-    kind: TransitionType
+    kind: TransitionKind
     """The requested transition kind."""
     unit: SceneUnit | None = field(default=None)
     """Target scene (for transitions that need one)."""
@@ -49,7 +49,7 @@ class SceneTransitionEvent:
         depth: Number of scenes on the stack after the transition.
     """
 
-    kind: TransitionType
+    kind: TransitionKind
     previous: SceneUnit | None
     current: SceneUnit | None
     depth: int
@@ -70,7 +70,7 @@ class SceneManager(ServiceUnit):
         super().__init__(name="SceneManager", tags={"service", "scene_manager"})
         self._stack: list[SceneUnit] = []
         self._pending: _Pending | None = None
-        self._pending_midpoint: TransitionType | None = None
+        self._pending_midpoint: TransitionKind | None = None
         self._step_scene: SceneUnit | None = None
         self.on_transition_queued = Signal("on_scene_transition_queued")
         self.on_transition_applied = Signal("on_scene_transition_applied")
@@ -127,7 +127,7 @@ class SceneManager(ServiceUnit):
 
     def request_transition(
         self,
-        kind: TransitionType,
+        kind: TransitionKind,
         scene_factory: Callable[[], SceneUnit] | None = None,
     ) -> bool:
         """Request transition via the installed behavior.
@@ -157,7 +157,7 @@ class SceneManager(ServiceUnit):
         Returns:
             bool: ``True`` if the request was accepted.
         """
-        return self.request_transition(TransitionType.PUSH, scene_factory)
+        return self.request_transition(TransitionKind.PUSH, scene_factory)
 
     def request_pop(self) -> bool:
         """Request pop transition via active behavior.
@@ -165,7 +165,7 @@ class SceneManager(ServiceUnit):
         Returns:
             bool: ``True`` if the request was accepted.
         """
-        return self.request_transition(TransitionType.POP)
+        return self.request_transition(TransitionKind.POP)
 
     def request_change(self, scene_factory: Callable[[], SceneUnit]) -> bool:
         """Request change transition via active behavior.
@@ -177,7 +177,7 @@ class SceneManager(ServiceUnit):
         Returns:
             bool: ``True`` if the request was accepted.
         """
-        return self.request_transition(TransitionType.CHANGE, scene_factory)
+        return self.request_transition(TransitionKind.CHANGE, scene_factory)
 
     def request_replace_all(self, scene_factory: Callable[[], SceneUnit]) -> bool:
         """Request replace_all transition via active behavior.
@@ -189,7 +189,7 @@ class SceneManager(ServiceUnit):
         Returns:
             bool: ``True`` if the request was accepted.
         """
-        return self.request_transition(TransitionType.REPLACE_ALL, scene_factory)
+        return self.request_transition(TransitionKind.REPLACE_ALL, scene_factory)
 
     def push(self, unit: SceneUnit) -> None:
         """Queue push operation for a scene.
@@ -197,11 +197,11 @@ class SceneManager(ServiceUnit):
         Args:
             unit: Scene to push onto the top of the stack.
         """
-        self._queue_transition(TransitionType.PUSH, unit)
+        self._queue_transition(TransitionKind.PUSH, unit)
 
     def pop(self) -> None:
         """Queue pop operation for the top scene."""
-        self._queue_transition(TransitionType.POP)
+        self._queue_transition(TransitionKind.POP)
 
     def change(self, unit: SceneUnit) -> None:
         """Queue change operation for the top scene.
@@ -209,7 +209,7 @@ class SceneManager(ServiceUnit):
         Args:
             unit: Replacement scene for the top of the stack.
         """
-        self._queue_transition(TransitionType.CHANGE, unit)
+        self._queue_transition(TransitionKind.CHANGE, unit)
 
     def replace_all(self, unit: SceneUnit) -> None:
         """Queue replace_all operation for the stack.
@@ -217,7 +217,7 @@ class SceneManager(ServiceUnit):
         Args:
             unit: New scene that becomes the only scene on the stack.
         """
-        self._queue_transition(TransitionType.REPLACE_ALL, unit)
+        self._queue_transition(TransitionKind.REPLACE_ALL, unit)
 
     def begin_step(self) -> None:
         """Open spawn gate on current scene (App calls this at fixed-step start)."""
@@ -251,9 +251,7 @@ class SceneManager(ServiceUnit):
         if self.current is not None:
             self.current.dispatch_render(renderer)
 
-    # ---------------------------------------------------- apply pending (internal)
-
-    def _notify_transition_started(self, kind: TransitionType) -> None:
+    def _notify_transition_started(self, kind: TransitionKind) -> None:
         """Emit signal when transition behavior starts.
 
         Args:
@@ -263,7 +261,7 @@ class SceneManager(ServiceUnit):
 
     def _notify_transition_midpoint(
         self,
-        kind: TransitionType,
+        kind: TransitionKind,
         current: SceneUnit | None,
     ) -> None:
         """Emit signal at transition midpoint.
@@ -283,7 +281,7 @@ class SceneManager(ServiceUnit):
         self.on_transition_finished.emit(current)
 
     def _queue_transition(
-        self, kind: TransitionType, unit: SceneUnit | None = None
+        self, kind: TransitionKind, unit: SceneUnit | None = None
     ) -> None:
         """Store a transition request as pending operation.
 
@@ -318,13 +316,13 @@ class SceneManager(ServiceUnit):
         previous = self.current
 
         match pending.kind:
-            case TransitionType.PUSH:
+            case TransitionKind.PUSH:
                 self._do_push(pending.unit)
-            case TransitionType.POP:
+            case TransitionKind.POP:
                 self._do_pop()
-            case TransitionType.CHANGE:
+            case TransitionKind.CHANGE:
                 self._do_change(pending.unit)
-            case TransitionType.REPLACE_ALL:
+            case TransitionKind.REPLACE_ALL:
                 self._do_replace_all(pending.unit)
 
         self.on_transition_applied.emit(
@@ -391,8 +389,6 @@ class SceneManager(ServiceUnit):
         self._stack.append(unit)
         unit.load()
 
-    # ----------------------------------------------------------------- cleanup
-
     def shutdown(self) -> None:
         """Cancel pending transitions and unload all scenes from top to bottom."""
         self._pending = None
@@ -437,7 +433,7 @@ class SceneController:
     class _QueuedTransition:
         """A transition queued by :class:`SceneController`."""
 
-        kind: TransitionType
+        kind: TransitionKind
         """The queued transition kind."""
         scene_factory: Callable[[], SceneUnit] | None = None
         """Factory for the target scene (for transitions that need one)."""
@@ -480,7 +476,7 @@ class SceneController:
 
     def request(
         self,
-        kind: TransitionType,
+        kind: TransitionKind,
         scene_factory: Callable[[], SceneUnit] | None = None,
     ) -> bool:
         """Request a new transition.
@@ -504,9 +500,9 @@ class SceneController:
         if (
             kind
             in (
-                TransitionType.PUSH,
-                TransitionType.CHANGE,
-                TransitionType.REPLACE_ALL,
+                TransitionKind.PUSH,
+                TransitionKind.CHANGE,
+                TransitionKind.REPLACE_ALL,
             )
             and scene_factory is None
         ):
@@ -527,7 +523,7 @@ class SceneController:
         Returns:
             bool: ``True`` if the request was accepted.
         """
-        return self.request(TransitionType.PUSH, scene_factory)
+        return self.request(TransitionKind.PUSH, scene_factory)
 
     def request_pop(self) -> bool:
         """Shortcut for pop transition request.
@@ -535,7 +531,7 @@ class SceneController:
         Returns:
             bool: ``True`` if the request was accepted.
         """
-        return self.request(TransitionType.POP)
+        return self.request(TransitionKind.POP)
 
     def request_change(self, scene_factory: Callable[[], SceneUnit]) -> bool:
         """Shortcut for change transition request.
@@ -546,7 +542,7 @@ class SceneController:
         Returns:
             bool: ``True`` if the request was accepted.
         """
-        return self.request(TransitionType.CHANGE, scene_factory)
+        return self.request(TransitionKind.CHANGE, scene_factory)
 
     def request_replace_all(self, scene_factory: Callable[[], SceneUnit]) -> bool:
         """Shortcut for replace_all transition request.
@@ -557,7 +553,7 @@ class SceneController:
         Returns:
             bool: ``True`` if the request was accepted.
         """
-        return self.request(TransitionType.REPLACE_ALL, scene_factory)
+        return self.request(TransitionKind.REPLACE_ALL, scene_factory)
 
     def _apply_to_manager(self, pending: _QueuedTransition) -> None:
         """Apply queued transition to bound scene manager.
@@ -572,17 +568,17 @@ class SceneController:
         scene = pending.scene_factory() if pending.scene_factory is not None else None
 
         match pending.kind:
-            case TransitionType.PUSH:
+            case TransitionKind.PUSH:
                 if scene is None:
                     return
                 manager.push(scene)
-            case TransitionType.POP:
+            case TransitionKind.POP:
                 manager.pop()
-            case TransitionType.CHANGE:
+            case TransitionKind.CHANGE:
                 if scene is None:
                     return
                 manager.change(scene)
-            case TransitionType.REPLACE_ALL:
+            case TransitionKind.REPLACE_ALL:
                 if scene is None:
                     return
                 manager.replace_all(scene)

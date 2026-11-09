@@ -1,7 +1,6 @@
 {
   "id": "background/Background_2",
-  "image_path": "D:\\Dev\\!Project-Me\\plyunit\\examples\\test_assets\\data\\background\\background 2.png",
-  "config_path": "D:\\Dev\\!Project-Me\\plyunit\\examples\\test_assets\\data\\background\\background 2.json",
+  "image_path": "background/background 2.png",
   "texture": {
     "filter": "nearest",
     "wrap": "clamp",

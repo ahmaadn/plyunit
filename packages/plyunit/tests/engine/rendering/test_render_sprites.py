@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -198,3 +200,79 @@ def test_render_sprites_profile_counters() -> None:
 
     assert renderer.frame_profile["sprite_count"] == 2.0
     assert renderer.frame_profile["sprite_batch_count"] == 1.0
+
+
+@pytest.mark.parametrize(
+    "source_kind", ["implicit", "none", "explicit", "list", "array"]
+)
+def test_whole_texture_sources_skip_uv_recalculation(
+    monkeypatch: pytest.MonkeyPatch, source_kind: str
+) -> None:
+    import plyunit.rendering.renderer as renderer_module
+
+    renderer, _ubr = make_renderer()
+    textures = [make_texture(index, 16, 8) for index in range(1, 9)]
+    sources: Any
+    if source_kind == "implicit":
+        sources = None
+    elif source_kind == "none":
+        sources = [None] * len(textures)
+    elif source_kind == "list":
+        sources = [[0.0, 0.0, 16.0, 8.0] for _ in textures]
+    elif source_kind == "array":
+        sources = np.tile((0.0, 0.0, 16.0, 8.0), (len(textures), 1))
+    else:
+        sources = [(0.0, 0.0, 16.0, 8.0)] * len(textures)
+    resolve = Mock(wraps=renderer_module.resolve_uv)
+    monkeypatch.setattr(renderer_module, "resolve_uv", resolve)
+
+    renderer.render_sprites(
+        textures=textures,
+        pos_xy=np.zeros((len(textures), 2), dtype=np.float32),
+        sources=cast(Any, sources),
+    )
+
+    resolve.assert_not_called()
+    assert renderer._frame_buffer.uv_rect[: len(textures)].tolist() == [
+        [0.0, 0.0, 1.0, 1.0]
+    ] * len(textures)
+    assert renderer._frame_buffer.size_wh[: len(textures)].tolist() == [
+        [16.0, 8.0]
+    ] * len(textures)
+
+
+@pytest.mark.parametrize("explicit", [False, True])
+def test_bulk_fast_path_preserves_region_and_flipped_sources(
+    monkeypatch: pytest.MonkeyPatch, explicit: bool
+) -> None:
+    import plyunit.rendering.renderer as renderer_module
+
+    renderer, _ubr = make_renderer()
+    rectangles = [
+        (0.0, 0.0, 32.0, 32.0),
+        (8.0, 16.0, 8.0, 8.0),
+        (32.0, 32.0, -16.0, -16.0),
+    ]
+    textures = [
+        make_texture(index, 32, 32, source_rect=rect)
+        for index, rect in enumerate(rectangles, start=1)
+    ]
+    resolve = Mock(wraps=renderer_module.resolve_uv)
+    monkeypatch.setattr(renderer_module, "resolve_uv", resolve)
+
+    renderer.render_sprites(
+        textures=textures,
+        positions=[(0.0, 0.0)] * len(textures),
+        sources=rectangles if explicit else None,
+        scales=[1.0, 2.0, 0.5],
+    )
+
+    assert resolve.call_count == 2
+    np.testing.assert_allclose(
+        renderer._frame_buffer.uv_rect[:3],
+        [(0.0, 0.0, 1.0, 1.0), (0.25, 0.5, 0.5, 0.75), (1.0, 1.0, 0.5, 0.5)],
+    )
+    np.testing.assert_allclose(
+        renderer._frame_buffer.size_wh[:3], [(32.0, 32.0), (16.0, 16.0), (8.0, 8.0)]
+    )
+    assert renderer._frame_buffer.tex_id[:3].tolist() == [1, 2, 3]

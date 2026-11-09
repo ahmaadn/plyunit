@@ -14,7 +14,7 @@ from plyunit.backends.integrations.raylib.text import Text
 from plyunit.backends.ports.text import TemplateText
 from plyunit.core.units.service_unit import ServiceUnit
 from plyunit.core.units.unit_registry import UnitRegistry
-from plyunit.services.text import ShapeCache, build_default_templates
+from plyunit.services.text.shape import ShapeCache, build_default_templates
 
 
 def _fake_font(*, tex_id: int = 7, base_size: int = 16, advance: int = 8):

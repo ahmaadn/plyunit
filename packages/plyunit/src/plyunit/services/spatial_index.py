@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 
@@ -12,19 +11,6 @@ from plyunit.utils.data_structures.spatial_hash import SpatialHash
 if TYPE_CHECKING:
     from plyunit.core.units.node_unit import NodeUnit
     from plyunit.core.units.scene_unit import SceneUnit
-
-
-class SpatialIndexStats:
-    """Opt-in counters for the incremental path. Only allocated when
-    ``SpatialIndex(stats_enabled=True)``. Zero cost when absent."""
-
-    __slots__ = ("last_dirty_count", "last_full_count", "last_update_ms")
-
-    def __init__(self) -> None:
-        """Initialize all counters to zero."""
-        self.last_dirty_count: int = 0
-        self.last_full_count: int = 0
-        self.last_update_ms: float = 0.0
 
 
 class SpatialIndex(ServiceUnit):
@@ -42,8 +28,6 @@ class SpatialIndex(ServiceUnit):
       - ``attach`` / ``detach`` (immediate upsert / remove)
       - ``EntityPool.release`` (already calls ``remove``)
 
-    Set ``stats_enabled=True`` to populate ``self.stats`` counters for
-    measurement. Leave it off in shipping builds.
     """
 
     def __init__(
@@ -52,7 +36,6 @@ class SpatialIndex(ServiceUnit):
         *,
         cell_size: float = 64.0,
         tags: set[str] | None = None,
-        stats_enabled: bool = False,
     ) -> None:
         """Initialize the spatial index service.
 
@@ -60,7 +43,6 @@ class SpatialIndex(ServiceUnit):
             name: Service name; defaults to ``"SpatialIndex"``.
             cell_size: Hash grid cell size in world units.
             tags: Optional tags passed to the ServiceUnit registry.
-            stats_enabled: Populate ``self.stats`` counters for measurement.
         """
         super().__init__(name or "SpatialIndex", tags=tags)
         self._hash: SpatialHash[Any] = SpatialHash(cell_size=cell_size)
@@ -74,13 +56,6 @@ class SpatialIndex(ServiceUnit):
         # True once a full refresh_scene has populated the index for the
         # current scene; SceneUnit bootstraps once then goes incremental.
         self._bootstrapped: bool = False
-        self.stats: SpatialIndexStats | None = (
-            SpatialIndexStats() if stats_enabled else None
-        )
-
-    # ------------------------------------------------------------------
-    # Membership
-    # ------------------------------------------------------------------
 
     def set_bounds(
         self,
@@ -157,7 +132,6 @@ class SpatialIndex(ServiceUnit):
         """
         if not self._dirty:
             return 0
-        start = time.perf_counter() if self.stats is not None else 0.0
         ids = self._dirty
         self._dirty = set()
         count = 0
@@ -167,14 +141,7 @@ class SpatialIndex(ServiceUnit):
                 continue
             self._upsert(node)
             count += 1
-        if self.stats is not None:
-            self.stats.last_dirty_count = count
-            self.stats.last_update_ms = (time.perf_counter() - start) * 1000.0
         return count
-
-    # ------------------------------------------------------------------
-    # Queries
-    # ------------------------------------------------------------------
 
     def query_aabb(
         self,
@@ -216,7 +183,6 @@ class SpatialIndex(ServiceUnit):
         scene root + pre-existing nodes that were never individually
         ``attach``-ed).
         """
-        start = time.perf_counter() if self.stats is not None else 0.0
         self._hash.clear()
         self._attached.clear()
         self._dirty.clear()
@@ -225,21 +191,12 @@ class SpatialIndex(ServiceUnit):
         if root is None:
             self._bootstrapped = True
             return
-        count = 0
         for node in root.traverse_preorder():
             self._upsert(node)
             iid = id(node)
             self._attached.add(iid)
             self._nodes_by_id[iid] = node
-            count += 1
         self._bootstrapped = True
-        if self.stats is not None:
-            self.stats.last_full_count = count
-            self.stats.last_update_ms = (time.perf_counter() - start) * 1000.0
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
 
     def _upsert(self, node: NodeUnit) -> None:
         """Reinsert ``node`` using its render bounds or a degenerate point AABB."""
