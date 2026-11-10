@@ -1,29 +1,22 @@
-"""Debug physics rendering for the current typed renderer.
-
-This module provides :class:`PhysicsDebugDraw` — a component that draws a
-debug overlay for every registered pymunk shape (dynamic bodies, static
-bodies, areas/sensors, AABBs, and contact points). It is compatible with
-plyunit's typed renderer (following ``RenderContext`` and ``Layer.DEBUG``).
-"""
+"""Debug physics rendering for the current typed renderer."""
 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
+from plyunit.backends.ports.physics import IPhysics
 from plyunit.core.components.component import Component
 from plyunit.rendering.enum import BlendMode, Layer
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from plyunit.backends.ports.physics import AreaStateView, BodyStateView
     from plyunit.backends.ports.renderer import ICanvas2D
-    from plyunit.core.components.physics import PhysicsShape
     from plyunit.rendering.render_state import RenderContext
     from plyunit.rendering.renderer import Renderer
-
-    from .physics_area import PhysicsArea
-    from .physics_body import PhysicsBody
-    from .service import Physics
-    from .static_body import StaticBody
+    from plyunit.services.physics._types import AABB, PhysicsShape, StaticBody
 
 _COLOR_DYNAMIC = (0, 200, 50, 180)
 _COLOR_DYNAMIC_SLEEPING = (80, 80, 80, 140)
@@ -66,7 +59,7 @@ def _transform_point(
 
 
 class PhysicsDebugDraw(Component):
-    """Debug draw overlay for all registered pymunk physics shapes."""
+    """Debug draw overlay for all registered physics shapes (backend agnostic)."""
 
     def __init__(
         self,
@@ -101,19 +94,21 @@ class PhysicsDebugDraw(Component):
         self.max_debug_shapes = max_debug_shapes
         self.max_contact_points = max_contact_points
         self._debug_shapes_submitted = 0
-        self._physics_service: Physics | None = None
+        self._physics_service: IPhysics | None = None
 
     def on_start(self) -> None:
-        """Resolve and cache the global ``Physics`` service on component start."""
-        self._resolve_physics_service()
+        """Resolve the global physics service on component start."""
+        if self.unit is None:
+            return
+
+        self._physics_service = cast(
+            IPhysics, self.unit.one("@Physics", scope="global")
+        )
 
     def render_submit(
         self, renderer: Renderer, context: RenderContext | None = None
     ) -> None:
         """Submit physics debug primitives to a world-space debug render pass."""
-        _ = context
-        if self._physics_service is None:
-            self._resolve_physics_service()
         if self._physics_service is None:
             return
 
@@ -123,22 +118,41 @@ class PhysicsDebugDraw(Component):
 
         if self.draw_statics:
             for static in self._physics_service.get_statics():
-                if self._is_visible(getattr(static, "_pm_shapes", None), view_bb):
-                    self._submit_static(renderer, static)
+                if self._debug_cap_reached():
+                    return
+                bounds = (
+                    self._physics_service.get_static_shape_bounds(static)
+                    if view_bb is not None or self.draw_aabb
+                    else ()
+                )
+                if self.draw_aabb:
+                    bounds = tuple(bounds)
+                if self._is_visible(bounds, view_bb):
+                    self._submit_static(renderer, static, bounds)
 
         if self.draw_bodies:
             for record in self._physics_service.iter_body_states():
                 if self._debug_cap_reached():
                     return
-                if self._is_visible(record.pm_shapes, view_bb):
-                    self._submit_body_record(renderer, record)
+                bounds = (
+                    record.shape_bounds if view_bb is not None or self.draw_aabb else ()
+                )
+                if self.draw_aabb:
+                    bounds = tuple(bounds)
+                if self._is_visible(bounds, view_bb):
+                    self._submit_body_record(renderer, record, bounds)
 
         if self.draw_areas:
-            for record in self._physics_service._area_records:
+            for record in self._physics_service.iter_area_states():
                 if self._debug_cap_reached():
                     return
-                if self._is_visible(record.pm_shapes, view_bb):
-                    self._submit_area_record(renderer, record)
+                bounds = (
+                    record.shape_bounds if view_bb is not None or self.draw_aabb else ()
+                )
+                if self.draw_aabb:
+                    bounds = tuple(bounds)
+                if self._is_visible(bounds, view_bb):
+                    self._submit_area_record(renderer, record, bounds)
 
         if self.draw_contacts:
             self._submit_contact_points(renderer, view_bb)
@@ -162,22 +176,6 @@ class PhysicsDebugDraw(Component):
     def draw(self, canvas: ICanvas2D) -> None:
         """Leave drawing to the queued debug primitives in ``render_submit``."""
         _ = canvas
-
-    def _resolve_physics_service(self) -> None:
-        """Locate the global ``Physics`` service from the unit, if present."""
-        if self.unit is None:
-            return
-
-        svc = self.unit.one_or_none("@Physics", scope="global")
-        if svc is None:
-            svc = self.unit.one_or_none("Physics", scope="global")
-        if svc is None:
-            return
-
-        from .service import Physics
-
-        if isinstance(svc, Physics):
-            self._physics_service = svc
 
     def _ensure_debug_pass(self, renderer: Renderer) -> None:
         """Create the world-space ``physics_debug`` pass on the renderer if needed."""
@@ -219,66 +217,30 @@ class PhysicsDebugDraw(Component):
 
     @staticmethod
     def _is_visible(
-        pm_shapes: Any, view_bb: tuple[float, float, float, float] | None
+        bounds: Iterable[AABB], view_bb: tuple[float, float, float, float] | None
     ) -> bool:
-        """Return whether any of the given pymunk shapes intersects the view
-        bounding box."""
+        """Return whether any of the shape bounds intersects the view box."""
         if view_bb is None:
             return True
-        if not pm_shapes:
-            return False
 
         view_left, view_top, view_right, view_bottom = view_bb
-        for pm_shape in pm_shapes:
-            bb = getattr(pm_shape, "bb", None)
-            if bb is None:
-                continue
-            left = float(min(bb.left, bb.right))
-            right = float(max(bb.left, bb.right))
-            top = float(min(bb.top, bb.bottom))
-            bottom = float(max(bb.top, bb.bottom))
+        for b in bounds:
             if (
-                right >= view_left
-                and left <= view_right
-                and bottom >= view_top
-                and top <= view_bottom
+                b.max_x >= view_left
+                and b.min_x <= view_right
+                and b.max_y >= view_top
+                and b.min_y <= view_bottom
             ):
                 return True
         return False
 
-    def _submit_body(self, renderer: Renderer, body: PhysicsBody) -> None:
-        """Submit debug primitives for a ``PhysicsBody`` component."""
-        from plyunit.core.components.physics import BodyType
-
-        if body._pm_body is None:
-            return
-
-        if body.is_sleeping:
-            color = _COLOR_DYNAMIC_SLEEPING
-        elif body.body_type == BodyType.KINEMATIC:
-            color = _COLOR_KINEMATIC
-        else:
-            color = _COLOR_DYNAMIC
-
-        world = body.world_transform_lerp()
-        pos_x, pos_y = world.position
-        self._submit_shapes(
-            renderer,
-            body.shapes,
-            pos_x,
-            pos_y,
-            world.rotation,
-            color,
-            sensor_fill=False,
-        )
-        if self.draw_aabb:
-            self._submit_aabb(renderer, body._pm_shapes, color)
-
-    def _submit_body_record(self, renderer: Renderer, record: Any) -> None:
+    def _submit_body_record(
+        self, renderer: Renderer, record: BodyStateView, bounds: Iterable[AABB]
+    ) -> None:
         """Submit debug primitives for an SoA body state record."""
-        from plyunit.core.components.physics import BodyType
+        from plyunit.services.physics._types import BodyType
 
-        if record.pm_body.is_sleeping:
+        if record.is_sleeping:
             color = _COLOR_DYNAMIC_SLEEPING
         elif record.body_type == BodyType.KINEMATIC:
             color = _COLOR_KINEMATIC
@@ -296,9 +258,11 @@ class PhysicsDebugDraw(Component):
             sensor_fill=False,
         )
         if self.draw_aabb:
-            self._submit_aabb(renderer, record.pm_shapes, color)
+            self._submit_aabb(renderer, bounds, color)
 
-    def _submit_static(self, renderer: Renderer, static: StaticBody) -> None:
+    def _submit_static(
+        self, renderer: Renderer, static: StaticBody, bounds: Iterable[AABB]
+    ) -> None:
         """Submit debug primitives for a ``StaticBody`` (no rotation)."""
         pos_x, pos_y = static.position
         self._submit_shapes(
@@ -311,28 +275,11 @@ class PhysicsDebugDraw(Component):
             sensor_fill=False,
         )
         if self.draw_aabb:
-            self._submit_aabb(renderer, static._pm_shapes, _COLOR_STATIC)
+            self._submit_aabb(renderer, bounds, _COLOR_STATIC)
 
-    def _submit_area(self, renderer: Renderer, area: PhysicsArea) -> None:
-        """Submit filled debug primitives for a ``PhysicsArea`` component."""
-        if area._pm_body is None:
-            return
-
-        world = area.world_transform_lerp()
-        pos_x, pos_y = world.position
-        self._submit_shapes(
-            renderer,
-            area.shapes,
-            pos_x,
-            pos_y,
-            world.rotation,
-            _COLOR_AREA,
-            sensor_fill=True,
-        )
-        if self.draw_aabb:
-            self._submit_aabb(renderer, area._pm_shapes, _COLOR_AREA)
-
-    def _submit_area_record(self, renderer: Renderer, record: Any) -> None:
+    def _submit_area_record(
+        self, renderer: Renderer, record: AreaStateView, bounds: Iterable[AABB]
+    ) -> None:
         """Submit filled debug primitives for an SoA area record."""
         pos_x, pos_y, angle = self._record_transform(record)
         self._submit_shapes(
@@ -345,7 +292,7 @@ class PhysicsDebugDraw(Component):
             sensor_fill=True,
         )
         if self.draw_aabb:
-            self._submit_aabb(renderer, record.pm_shapes, _COLOR_AREA)
+            self._submit_aabb(renderer, bounds, _COLOR_AREA)
 
     def _submit_shapes(
         self,
@@ -360,7 +307,7 @@ class PhysicsDebugDraw(Component):
     ) -> None:
         """Submit debug primitives for a list of shape definitions at a body
         transform."""
-        from plyunit.core.components.physics import (
+        from plyunit.services.physics._types import (
             BoxShape,
             CircleShape,
             PolygonShape,
@@ -374,9 +321,11 @@ class PhysicsDebugDraw(Component):
             shape_x, shape_y = _transform_point(pos_x, pos_y, ox, oy, angle_deg)
 
             if isinstance(shape, CircleShape):
+                center = (shape_x, shape_y)
+                radius = shape.radius
                 fill = (color[0], color[1], color[2], 40) if sensor_fill else None
                 renderer.render_custom(
-                    draw_func=lambda canvas, center=(shape_x, shape_y), radius=shape.radius, fill=fill: (
+                    draw_func=lambda canvas, center=center, radius=radius, fill=fill: (
                         canvas.draw_circle(
                             center=center,
                             radius=radius,
@@ -390,22 +339,23 @@ class PhysicsDebugDraw(Component):
                 )
                 end_x = shape_x + math.cos(math.radians(angle_deg)) * shape.radius
                 end_y = shape_y + math.sin(math.radians(angle_deg)) * shape.radius
+                end = (end_x, end_y)
                 renderer.render_custom(
-                    draw_func=lambda canvas, start=(shape_x, shape_y), end=(end_x, end_y): (
-                        canvas.draw_line(
-                            start=start,
-                            end=end,
-                            color=color,
-                            thickness=1.5,
-                        )
+                    draw_func=lambda canvas, start=center, end=end: canvas.draw_line(
+                        start=start,
+                        end=end,
+                        color=color,
+                        thickness=1.5,
                     ),
                     **self._debug_state(),
                 )
                 continue
 
             if isinstance(shape, BoxShape):
+                rect = (shape_x, shape_y, shape.width, shape.height)
+                origin = (shape.width / 2.0, shape.height / 2.0)
                 renderer.render_custom(
-                    draw_func=lambda canvas, rect=(shape_x, shape_y, shape.width, shape.height), origin=(shape.width / 2.0, shape.height / 2.0): (
+                    draw_func=lambda canvas, rect=rect, origin=origin: (
                         canvas.draw_rectangle(
                             rect=rect,
                             color=(color[0], color[1], color[2], 40)
@@ -437,13 +387,16 @@ class PhysicsDebugDraw(Component):
                     oy + shape.b[1],
                     angle_deg,
                 )
+                thickness = max(2.0, shape.radius * 2.0)
                 renderer.render_custom(
-                    draw_func=lambda canvas, start=start, end=end, thickness=max(2.0, shape.radius * 2.0): (
-                        canvas.draw_line(
-                            start=start,
-                            end=end,
-                            color=color,
-                            thickness=thickness,
+                    draw_func=(
+                        lambda canvas, start=start, end=end, thickness=thickness: (
+                            canvas.draw_line(
+                                start=start,
+                                end=end,
+                                color=color,
+                                thickness=thickness,
+                            )
                         )
                     ),
                     **self._debug_state(),
@@ -481,28 +434,18 @@ class PhysicsDebugDraw(Component):
     def _submit_aabb(
         self,
         renderer: Renderer,
-        pm_shapes: Any,
+        bounds: Iterable[AABB],
         color: tuple[int, int, int, int],
     ) -> None:
-        """Submit axis-aligned bounding boxes for the given pymunk shapes."""
-        if not pm_shapes:
-            return
-        for pm_shape in pm_shapes:
-            bb = getattr(pm_shape, "bb", None)
-            if bb is None:
-                continue
-            left = float(min(bb.left, bb.right))
-            right = float(max(bb.left, bb.right))
-            top = float(min(bb.top, bb.bottom))
-            bottom = float(max(bb.top, bb.bottom))
+        """Submit axis-aligned bounding boxes for the given shape bounds."""
+        for b in bounds:
+            rect = (b.min_x, b.min_y, b.max_x - b.min_x, b.max_y - b.min_y)
             renderer.render_custom(
-                draw_func=lambda canvas, rect=(left, top, right - left, bottom - top): (
-                    canvas.draw_rectangle(
-                        rect=rect,
-                        border_color=color,
-                        outline_only=True,
-                        thickness=1.0,
-                    )
+                draw_func=lambda canvas, rect=rect: canvas.draw_rectangle(
+                    rect=rect,
+                    border_color=color,
+                    outline_only=True,
+                    thickness=1.0,
                 ),
                 **self._debug_state(),
             )
@@ -512,66 +455,36 @@ class PhysicsDebugDraw(Component):
         renderer: Renderer,
         view_bb: tuple[float, float, float, float] | None = None,
     ) -> None:
-        """Submit arbiter contact points, deduplicated and culled to the view."""
+        """Submit contact points from the physics service, culled to the view."""
         if self._physics_service is None:
             return
 
-        space = getattr(self._physics_service.backend, "_space", None)
-        if space is None:
-            return
-
-        seen: set[int] = set()
         submitted = 0
-
-        def submit_arbiter(arbiter: Any) -> None:
-            """Submit contact points of one arbiter (deduplicated by id)."""
-            nonlocal submitted
-            arbiter_id = id(arbiter)
-            if arbiter_id in seen:
+        for px, py in self._physics_service.iter_contact_points():
+            if (
+                self.max_contact_points is not None
+                and submitted >= self.max_contact_points
+            ):
                 return
-            seen.add(arbiter_id)
-            contacts = getattr(arbiter, "contact_point_set", None)
-            if contacts is None:
-                return
-            for contact in contacts.points:
-                if (
-                    self.max_contact_points is not None
-                    and submitted >= self.max_contact_points
-                ):
-                    return
-                point = contact.point_a
-                px, py = float(point.x), float(point.y)
-                if view_bb is not None:
-                    left, top, right, bottom = view_bb
-                    if px < left or px > right or py < top or py > bottom:
-                        continue
-                renderer.render_custom(
-                    draw_func=lambda canvas, center=(px, py): canvas.draw_circle(
-                        center=center,
-                        radius=3.0,
-                        color=_COLOR_CONTACT,
-                    ),
-                    **self._debug_state(),
-                )
-                submitted += 1
+            if view_bb is not None:
+                left, top, right, bottom = view_bb
+                if px < left or px > right or py < top or py > bottom:
+                    continue
+            renderer.render_custom(
+                draw_func=lambda canvas, center=(px, py): canvas.draw_circle(
+                    center=center,
+                    radius=3.0,
+                    color=_COLOR_CONTACT,
+                ),
+                **self._debug_state(),
+            )
+            submitted += 1
 
-        for body_pm in list(getattr(space, "bodies", ())):
-            each_arbiter = getattr(body_pm, "each_arbiter", None)
-            if each_arbiter is not None:
-                each_arbiter(submit_arbiter)
-
-    def _record_transform(self, record: Any) -> tuple[float, float, float]:
-        """Return the record's render-interpolated ``(x, y, angle)`` at the current
-        alpha."""
-        alpha = self._render_alpha()
-        interpolated = getattr(record, "interpolated", None)
-        if interpolated is not None:
-            return interpolated(alpha)
-        return (
-            record.prev_x + (record.x - record.prev_x) * alpha,
-            record.prev_y + (record.y - record.prev_y) * alpha,
-            record.prev_angle + (record.angle - record.prev_angle) * alpha,
-        )
+    def _record_transform(
+        self, record: BodyStateView | AreaStateView
+    ) -> tuple[float, float, float]:
+        """Return the record's render-interpolated ``(x, y, angle)``."""
+        return record.interpolated(self._render_alpha())
 
     def _render_alpha(self) -> float:
         """Return the window's render interpolation alpha, defaulting to 1.0."""

@@ -10,7 +10,7 @@ import pytest
 
 # pymunk is a real (non-mocked) dependency in the venv.
 from plyunit.backends.physics.pymunk.service import Physics
-from plyunit.core.components.physics import (
+from plyunit.services.physics._types import (
     BodyType,
     BoxShape,
     CollisionFilter,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+from typing import cast
 
 import pytest
 
@@ -18,7 +19,7 @@ def isolated_registry(monkeypatch: pytest.MonkeyPatch) -> UnitRegistry:
 def test_clear_statics_and_body_batch_info():
     pytest.importorskip("pymunk")
     import plyunit as pu
-    from plyunit.backends.physics.pymunk.service import PhysicsBodyCreateInfo
+    from plyunit.services.physics import PhysicsBodyCreateInfo
 
     svc = pu.Physics(gravity=(0.0, 0.0), enable_spatial_hash=False)
     for i in range(5):
@@ -71,26 +72,35 @@ def test_step_zero_and_profile():
 
 
 def test_pre_solve_handler_and_attach():
-    pytest.importorskip("pymunk")
     import plyunit as pu
 
     svc = pu.Physics(gravity=(0.0, 0.0), enable_spatial_hash=False)
     calls = []
 
     def handler(arbiter, space, data):
-        calls.append(1)
+        calls.append((arbiter, space))
 
     svc.add_pre_solve_handler(handler)
+    svc.add_static(pu.StaticBody(shapes=[pu.CircleShape(radius=10)]))
+    handle = svc.create_body(position=(15, 0), shapes=[pu.CircleShape(radius=10)])
+    app = pu.App()
+    app.on_fixed_update.emit(1 / 60)
+    assert calls
+    assert all(space is svc._space for _, space in calls)
 
-    class FakeApp:
-        def __init__(self):
-            self.on_fixed_update = pu.Signal("on_fixed_update")
-
-    app = FakeApp()
-    if hasattr(svc, "on_attach"):
-        svc.on_attach(app)
-        app.on_fixed_update.emit(1 / 60)
-    svc.step(1 / 60)
+    mover = svc.create_body(position=(100, 0), shapes=[pu.CircleShape(radius=2)])
+    svc.set_body_state(mover, velocity=(10, 0))
+    svc._detach_from_app(app)
+    before = svc.get_body_state(mover)
+    app.on_fixed_update.emit(1.0)
+    assert svc.get_body_state(mover) == before
+    svc._attach_to_app(app)
+    svc._attach_to_app(app)
+    app.on_fixed_update.emit(1.0)
+    assert svc.get_position(mover) == pytest.approx((110.0, 0.0))
+    svc.destroy_body_batch([handle, mover])
+    svc.clear_statics()
+    app.destroy()
 
 
 def test_debug_draw_statics_and_areas():
@@ -138,20 +148,19 @@ def test_debug_draw_statics_and_areas():
         def draw_line(self, **kw):
             self.primitives.append(("l", kw))
 
-    dbg = pu.PhysicsDebugDraw(
-        draw_bodies=True, draw_statics=True, draw_areas=True, draw_contacts=True
+    dbg = node.add_component(
+        pu.PhysicsDebugDraw(
+            draw_bodies=True, draw_statics=True, draw_areas=True, draw_contacts=True
+        )
     )
-    dbg.unit = type(
-        "U",
-        (),
-        {
-            "one_or_none": lambda self, ref, scope="mixed": svc
-            if "Physics" in str(ref)
-            else None,
-            "time": None,
-        },
-    )()
+    dbg.on_start()
     r = FakeRenderer()
-    dbg.render_submit(r, object())
-    assert r.passes or r.primitives
-    area.on_destroy()
+    dbg.render_submit(cast(pu.Renderer, r), pu.RenderContext())
+    assert "physics_debug" in r.passes
+    assert any(
+        kind == "c" and payload["radius"] == 12 for kind, payload in r.primitives
+    )
+    node.destroy_component(dbg)
+    node.destroy_component(area)
+    assert svc.area_count == 0
+    svc.clear_statics()

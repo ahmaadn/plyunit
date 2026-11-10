@@ -1,14 +1,4 @@
-"""Lazy facade for the active physics backend.
-
-All public names (``Physics``, ``PhysicsBody``, ...) are forwarded lazily
-from the active backend (see ``_selector.physics_module``) through
-``__getattr__`` — this package can be imported even when pymunk is not
-installed; an error only surfaces when an attribute is first accessed.
-
-For a concrete host path (rare):
-
-    from plyunit.backends.physics.pymunk import Physics
-"""
+"""Lazy facade for the active physics backend."""
 
 from __future__ import annotations
 
@@ -31,64 +21,19 @@ def _get_active_backend():
 # TYPE SAFE
 if TYPE_CHECKING:
     from .pymunk import (
-        AABB as AABB,
-        DYNAMIC_ACTOR as DYNAMIC_ACTOR,
-        DYNAMIC_SENSOR_TARGET as DYNAMIC_SENSOR_TARGET,
-        PROJECTILE as PROJECTILE,
-        SENSOR as SENSOR,
-        WORLD_STATIC as WORLD_STATIC,
-        BodyType as BodyType,
-        BoxShape as BoxShape,
-        CircleShape as CircleShape,
-        CollisionFilter as CollisionFilter,
-        CollisionInfo as CollisionInfo,
-        Physics as Physics,
-        PhysicsArea as PhysicsArea,
-        PhysicsBackend as PhysicsBackend,
-        PhysicsBody as PhysicsBody,
-        PhysicsDebugDraw as PhysicsDebugDraw,
-        PhysicsHandle as PhysicsHandle,
-        PhysicsShape as PhysicsShape,
-        PolygonShape as PolygonShape,
-        SegmentShape as SegmentShape,
-        StaticBody as StaticBody,
+        Physics,
+        PhysicsArea,
+        PhysicsBody,
+        PhysicsDebugDraw,
     )
 
 
-__all__ = (
-    "AABB",
-    "DYNAMIC_ACTOR",
-    "DYNAMIC_SENSOR_TARGET",
-    "PROJECTILE",
-    "SENSOR",
-    "WORLD_STATIC",
-    "BodyType",
-    "BoxShape",
-    "CircleShape",
-    "CollisionFilter",
-    "CollisionInfo",
-    "Physics",
-    "PhysicsArea",
-    "PhysicsBackend",
-    "PhysicsBody",
-    "PhysicsDebugDraw",
-    "PhysicsHandle",
-    "PhysicsShape",
-    "PolygonShape",
-    "SegmentShape",
-    "StaticBody",
-)
+__all__ = ("Physics", "PhysicsArea", "PhysicsBody", "PhysicsDebugDraw")
 
 _SUBS = {
-    # Debug
     "PhysicsDebugDraw": "debug_draw",
-    # Entities (Components)
     "PhysicsArea": "physics_area",
     "PhysicsBody": "physics_body",
-    # Static World
-    "StaticBody": "static_body",
-    # Service & Backend
-    "PhysicsBackend": "pymunk_adapter",
     "Physics": "service",
 }
 
@@ -107,7 +52,7 @@ def __getattr__(name: str):
     """
     if name not in __all__:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    # 1. Try the bundle root first.
+
     try:
         value = getattr(_get_active_backend(), name)
         globals()[name] = value
@@ -115,7 +60,6 @@ def __getattr__(name: str):
     except AttributeError:
         pass
 
-    # 2. Try the explicit submodule (e.g. ``service``).
     sub = _SUBS.get(name)
     if sub is not None:
         try:
@@ -127,7 +71,7 @@ def __getattr__(name: str):
                 f"module 'plyunit.backends.physics' has no attribute {name!r} "
                 f"(checked {_get_active_backend().__name__} and {sub})"
             ) from exc
-    # 3. Final fallback: look for ``name`` as a submodule of the bundle.
+
     try:
         value = getattr(import_module(f"{physics_module()}.{name}"), name)
         globals()[name] = value

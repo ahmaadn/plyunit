@@ -106,11 +106,12 @@ def test_bootstrap_optional_services_use_selected_adapters(bindings, monkeypatch
         "plyunit.rendering.renderer.Renderer", lambda **kwargs: object()
     )
     fake_physics = ModuleType("plyunit.backends.physics")
-    fake_physics.PhysicsBackend = Mock(return_value=object())
-    fake_physics.Physics = Mock(return_value=object())
+    physics_factory = Mock(return_value=object())
+    monkeypatch.setattr(fake_physics, "Physics", physics_factory, raising=False)
     monkeypatch.setitem(sys.modules, fake_physics.__name__, fake_physics)
     fake_imgui = ModuleType("plyunit.backends.imgui")
-    fake_imgui.ImGui = Mock(return_value=object())
+    imgui_factory = Mock(return_value=object())
+    monkeypatch.setattr(fake_imgui, "ImGui", imgui_factory, raising=False)
     monkeypatch.setitem(sys.modules, fake_imgui.__name__, fake_imgui)
     app = ConfigOnlyApp()
     config = AppConfig(
@@ -121,12 +122,18 @@ def test_bootstrap_optional_services_use_selected_adapters(bindings, monkeypatch
 
     bootstrap.init(app, config, scene_manager=None, animations=None)
 
-    fake_physics.PhysicsBackend.assert_called_once()
-    fake_physics.Physics.assert_called_once_with(
-        fake_physics.PhysicsBackend.return_value,
+    physics_factory.assert_called_once_with(
+        gravity=config.physics.gravity,
+        spatial_hash_dim=config.physics.spatial_hash_dim,
+        spatial_hash_count=config.physics.spatial_hash_count,
+        sleep_time_threshold=config.physics.sleep_time_threshold,
+        idle_speed_threshold=config.physics.idle_speed_threshold,
+        iterations=config.physics.iterations,
+        damping=config.physics.damping,
+        enable_spatial_hash=config.physics.enable_spatial_hash,
         world_bounds=config.physics.world_bounds,
     )
-    fake_imgui.ImGui.assert_called_once_with(
+    imgui_factory.assert_called_once_with(
         dark_style=config.imgui.dark_style, no_ini=config.imgui.no_ini
     )
     bindings["Audio"].from_config.assert_called_once_with(config.audio)

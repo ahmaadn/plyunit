@@ -17,11 +17,8 @@ def test_set_gravity_and_destroy_batch():
         )
         for i in range(5)
     ]
-    if hasattr(svc, "destroy_body_batch"):
-        svc.destroy_body_batch(handles)
-    else:
-        for h in handles:
-            svc.destroy_body(h)
+    svc.destroy_body_batch(handles)
+    assert svc.gravity == (0.0, 500.0)
     assert svc.body_count == 0
 
 
@@ -44,7 +41,9 @@ def test_register_unregister_area_and_step():
     area.add_shape(pu.BoxShape(width=30, height=30))
     area.add_shape(pu.CircleShape(radius=10))
     area.on_start()
-    assert area._registered or area._physics_service is svc
+    assert area._registered is True
+    assert area._physics_service is svc
+    assert svc.area_count == 1
 
     # dynamic body that might overlap
     h = svc.create_body(
@@ -62,7 +61,7 @@ def test_register_unregister_area_and_step():
 def test_kinematic_body_sync():
     pytest.importorskip("pymunk")
     import plyunit as pu
-    from plyunit.core.components.physics import BodyType
+    from plyunit.services.physics._types import BodyType
 
     svc = pu.Physics(gravity=(0.0, 0.0), enable_spatial_hash=False)
     registry = pu.UnitRegistry()
@@ -81,7 +80,11 @@ def test_kinematic_body_sync():
     node.transform.recalc_world(None)
     svc.step(1 / 30)
     svc.step(1 / 30)
+    handle = body._physics_handle
+    assert handle is not None
+    assert svc.get_position(handle) == pytest.approx((40.0, 0.0))
     node.destroy_component(body)
+    assert svc.body_count == 0
 
 
 def test_static_segment_polygon_aabb():

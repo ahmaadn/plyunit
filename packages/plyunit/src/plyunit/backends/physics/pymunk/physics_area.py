@@ -2,27 +2,22 @@
 
 A component that detects overlaps without a physical collision response.
 Useful for trigger zones, damage zones, pickup areas, etc.
-
-Usage example::
-
-    node.add_component(PhysicsArea(name="DamageZone"))
-    area.add_shape(CircleShape(radius=64, is_sensor=True))
-    area.on_body_entered.connect(lambda info: print("entered!"))
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pymunk
 
 from plyunit.core.components.component import Component
-from plyunit.core.components.physics import CollisionFilter, PhysicsShape
 from plyunit.events.signal import Signal
+from plyunit.services.physics._types import CollisionFilter, PhysicsHandle, PhysicsShape
 
 if TYPE_CHECKING:
+    from plyunit.backends.ports.physics import IPhysics
+
     from .physics_body import PhysicsBody
-    from .service import Physics
 
 
 class PhysicsArea(Component):
@@ -37,10 +32,7 @@ class PhysicsArea(Component):
         name: Optional unit name.
     """
 
-    def __init__(
-        self,
-        name: str | None = None,
-    ) -> None:
+    def __init__(self, name: str | None = None) -> None:
         """Initialize an empty sensor area with default filters and signals."""
         super().__init__(name=name)
 
@@ -77,8 +69,8 @@ class PhysicsArea(Component):
         # Internal pymunk references
         self._pm_body: pymunk.Body | None = None
         self._pm_shapes: list[pymunk.Shape] = []
-        self._physics_service: Physics | None = None
-        self._physics_handle = None
+        self._physics_service: IPhysics | None = None
+        self._physics_handle: PhysicsHandle | None = None
         self._registered = False
 
     @classmethod
@@ -120,10 +112,6 @@ class PhysicsArea(Component):
             raise RuntimeError("PhysicsArea must be attached to a NodeUnit")
         return self.unit.world_transform_lerp(alpha)
 
-    # ------------------------------------------------------------------
-    # Shape Management
-    # ------------------------------------------------------------------
-
     def add_shape(self, shape: PhysicsShape) -> PhysicsShape:
         """Add a collision shape to the area.
 
@@ -138,7 +126,7 @@ class PhysicsArea(Component):
         shape.is_sensor = True  # Force sensor mode
         self.shapes.append(shape)
         if self._registered and self._physics_service is not None:
-            self._physics_service._sync_area_shapes(self)
+            self._physics_service.sync_area_shapes(self)
         return shape
 
     def remove_shape(self, shape: PhysicsShape) -> None:
@@ -146,17 +134,13 @@ class PhysicsArea(Component):
         if shape in self.shapes:
             self.shapes.remove(shape)
             if self._registered and self._physics_service is not None:
-                self._physics_service._sync_area_shapes(self)
+                self._physics_service.sync_area_shapes(self)
 
     def clear_shapes(self) -> None:
         """Remove all shapes."""
         self.shapes.clear()
         if self._registered and self._physics_service is not None:
-            self._physics_service._sync_area_shapes(self)
-
-    # ------------------------------------------------------------------
-    # Query API
-    # ------------------------------------------------------------------
+            self._physics_service.sync_area_shapes(self)
 
     def get_overlapping_bodies(self) -> list[PhysicsBody]:
         """Return the list of PhysicsBody currently overlapping this area."""
@@ -173,10 +157,6 @@ class PhysicsArea(Component):
     def has_overlapping_areas(self) -> bool:
         """Check whether any other PhysicsArea is overlapping."""
         return len(self._overlapping_areas) > 0
-
-    # ------------------------------------------------------------------
-    # Internal — called by Physics
-    # ------------------------------------------------------------------
 
     def _on_body_enter(self, body: PhysicsBody) -> None:
         """Internal: a PhysicsBody entered the area."""
@@ -206,10 +186,6 @@ class PhysicsArea(Component):
             self._overlapping_areas.discard(area)
             self.on_area_exited.emit(area)
 
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
-
     def on_start(self) -> None:
         """Recalculate the world transform and register with the Physics service."""
         if self.unit is None:
@@ -220,15 +196,9 @@ class PhysicsArea(Component):
             self.transform.recalc_world(parent_world)
             self.transform.reset_interpolation()
 
-        svc = self.unit.one_or_none("@Physics", scope="global")
-        if svc is None:
-            svc = self.unit.one_or_none("Physics", scope="global")
-        if svc is not None:
-            from .service import Physics
-
-            if isinstance(svc, Physics):
-                self._physics_service = svc
-                svc.register_area(self)
+        svc = cast("IPhysics", self.unit.one("@Physics", scope="global"))
+        self._physics_service = svc
+        svc.register_area(self)
 
     def on_destroy(self) -> None:
         """Unregister from the Physics service and clear overlap tracking."""

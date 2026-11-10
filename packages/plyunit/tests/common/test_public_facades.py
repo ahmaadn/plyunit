@@ -20,8 +20,12 @@ def test_ports_export_handle_and_service_contracts() -> None:
     from plyunit.backends.ports.assets import IAssets
     from plyunit.backends.ports.handler import Texture2DHandle
     from plyunit.backends.ports.imgui import DrawCallback, ImGuiPort
+    from plyunit.backends.ports.physics import AreaStateView, BodyStateView, IPhysics
     from plyunit.backends.ports.text import IText
 
+    assert ports.IPhysics is IPhysics
+    assert ports.BodyStateView is BodyStateView
+    assert ports.AreaStateView is AreaStateView
     assert ports.IAssets is IAssets
     assert ports.Texture2DHandle is Texture2DHandle
     assert ports.DrawCallback is DrawCallback
@@ -194,11 +198,41 @@ def test_removed_api_is_not_reintroduced(facade, name: str) -> None:
         "plyunit.backends.imgui.raylib",
         "plyunit.backends.integrations.raylib.drawing",
         "plyunit.backends.integrations.raylib.core",
+        "plyunit.core.components.physics",
+        "plyunit.backends.physics.pymunk.pymunk_adapter",
+        "plyunit.backends.physics.pymunk.static_body",
     ],
 )
 def test_removed_packages_have_no_compatibility_shims(module_name: str) -> None:
     with pytest.raises(ModuleNotFoundError):
         importlib.import_module(module_name)
+
+
+@pytest.mark.parametrize("name", ["PhysicsBackend", "build_physics_service"])
+def test_removed_physics_exports_do_not_load_backend(monkeypatch, name):
+    import plyunit.backends.physics as physics
+    import plyunit.services.physics as service
+
+    def unexpected_lookup():
+        raise AssertionError("removed physics names must not load a backend")
+
+    monkeypatch.setattr(physics, "_get_active_backend", unexpected_lookup)
+    for facade in (plyunit, service, physics):
+        assert name not in facade.__all__
+        assert name not in dir(facade)
+        with pytest.raises(AttributeError, match=name):
+            getattr(facade, name)
+
+
+def test_physics_exports_resolve_current_types_and_components():
+    import plyunit.backends.physics as physics
+    import plyunit.services.physics as service
+
+    for name in ("Physics", "PhysicsBody", "PhysicsArea", "PhysicsDebugDraw"):
+        assert getattr(plyunit, name) is getattr(service, name)
+        assert getattr(service, name) is getattr(physics, name)
+    for name in ("AABB", "BoxShape", "CircleShape", "CollisionFilter", "StaticBody"):
+        assert getattr(plyunit, name) is getattr(service, name)
 
 
 def test_unknown_facade_names_fail_without_backend_lookup(monkeypatch) -> None:
@@ -224,6 +258,10 @@ class BlockBackends(importlib.abc.MetaPathFinder):
 sys.meta_path.insert(0, BlockBackends())
 import plyunit
 from plyunit import App, Animations, ShaderHandle, SpatialIndex, TemplateText, ports
+from plyunit import AABB, BoxShape, CollisionFilter, PhysicsHandle, StaticBody
+from plyunit.backends.ports.physics import IPhysics
+import plyunit.services.physics
+assert ports.IPhysics is IPhysics
 import plyunit.backends.imgui as imgui_facade
 from plyunit.backends.ports.imgui import DrawCallback, ImGuiPort
 assert ports.DrawCallback is DrawCallback

@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from plyunit.core.components.physics import (
+from plyunit.services.physics._types import (
     BoxShape,
     CircleShape,
     CollisionFilter,

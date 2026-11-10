@@ -3,21 +3,11 @@ from __future__ import annotations
 import pytest
 
 
-class HashableBody:
-    def __init__(self, i: int) -> None:
-        self.i = i
-
-    def __hash__(self) -> int:
-        return self.i
-
-    def __eq__(self, other) -> bool:
-        return isinstance(other, HashableBody) and other.i == self.i
-
-
 def test_physics_area_shapes_and_overlap_api():
     pytest.importorskip("pymunk")
     from plyunit.backends.physics.pymunk.physics_area import PhysicsArea
-    from plyunit.core.components.physics import BoxShape, CircleShape
+    from plyunit.backends.physics.pymunk.physics_body import PhysicsBody
+    from plyunit.services.physics._types import BoxShape, CircleShape
 
     area = PhysicsArea(name="A")
     s1 = BoxShape(width=10, height=10)
@@ -36,14 +26,11 @@ def test_physics_area_shapes_and_overlap_api():
     assert area.has_overlapping_bodies() is False
     assert area.has_overlapping_areas() is False
 
-    body = HashableBody(1)
+    body = PhysicsBody.dynamic()
     area2 = PhysicsArea(name="B")
-    # pyrefly: ignore [bad-argument-type]
     area._on_body_enter(body)
     assert area.has_overlapping_bodies()
-    # pyrefly: ignore [bad-argument-type]
     area._on_body_enter(body)
-    # pyrefly: ignore [bad-argument-type]
     area._on_body_exit(body)
     assert not area.has_overlapping_bodies()
 
@@ -54,7 +41,6 @@ def test_physics_area_shapes_and_overlap_api():
     assert not area.has_overlapping_areas()
 
     area.monitoring = False
-    # pyrefly: ignore [bad-argument-type]
     area._on_body_enter(body)
     assert not area.has_overlapping_bodies()
     area._on_area_enter(area2)
@@ -64,21 +50,19 @@ def test_physics_area_shapes_and_overlap_api():
     area.destroy()
 
 
-def test_physics_area_lifecycle_without_service(monkeypatch: pytest.MonkeyPatch):
+def test_physics_area_start_requires_global_service():
     pytest.importorskip("pymunk")
-    from plyunit.core.units import unit as unit_module
-    from plyunit.core.units.node_unit import NodeUnit
-    from plyunit.core.units.unit_registry import UnitRegistry
     from plyunit.backends.physics.pymunk.physics_area import PhysicsArea
-
-    # Isolate global registry so leftover Physics singletons from other
-    # tests cannot make one_or_none("@Physics") raise MultipleResultsFound.
-    registry = UnitRegistry()
-    monkeypatch.setattr(unit_module, "units", registry)
+    from plyunit.core.units.node_unit import NodeUnit
+    from plyunit.core.units.unit_registry import NoResultFound, UnitRegistry
 
     node = NodeUnit(name="n")
-    node.global_units = registry
-    area = PhysicsArea(name="zone")
-    node.add_component(area)
-    area.on_start()
-    area.on_destroy()
+    node.global_units = UnitRegistry()
+    area = node.add_component(PhysicsArea(name="zone"))
+
+    with pytest.raises(NoResultFound, match="@Physics"):
+        area.on_start()
+
+    assert area._registered is False
+    assert area._physics_service is None
+    node.destroy_component(area)

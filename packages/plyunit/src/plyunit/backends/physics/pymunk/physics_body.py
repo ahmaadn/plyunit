@@ -1,32 +1,23 @@
-"""PhysicsBody — dynamic/kinematic physics body component.
-
-This component represents an entity with a real collision response in the
-physics world. Position is synced two-way between the owning ``NodeUnit``
-transform and the pymunk body on every physics step.
-
-Usage example::
-
-    node.add_component(PhysicsBody(body_type=BodyType.DYNAMIC, mass=1.0))
-    body.add_shape(CircleShape(radius=16))
-"""
+"""PhysicsBody — dynamic/kinematic physics body component."""
 
 from __future__ import annotations
 
 import math
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pymunk
 
 from plyunit.core.components.component import Component
-from plyunit.core.components.physics import (
+from plyunit.events.signal import Signal
+from plyunit.services.physics._types import (
     BodyType,
     CollisionFilter,
+    PhysicsHandle,
     PhysicsShape,
 )
-from plyunit.events.signal import Signal
 
 if TYPE_CHECKING:
-    from .service import Physics
+    from plyunit.backends.ports.physics import IPhysics
 
 
 class PhysicsBody(Component):
@@ -76,8 +67,8 @@ class PhysicsBody(Component):
         # Internal pymunk references — managed by Physics
         self._pm_body: pymunk.Body | None = None
         self._pm_shapes: list[pymunk.Shape] = []
-        self._physics_service: Physics | None = None
-        self._physics_handle = None
+        self._physics_service: IPhysics | None = None
+        self._physics_handle: PhysicsHandle | None = None
 
         # Flag: whether it is already registered with the physics service
         self._registered = False
@@ -144,7 +135,7 @@ class PhysicsBody(Component):
         """
         self.shapes.append(shape)
         if self._registered and self._physics_service is not None:
-            self._physics_service._sync_body_shapes(self)
+            self._physics_service.sync_body_shapes(self)
         return shape
 
     def remove_shape(self, shape: PhysicsShape) -> None:
@@ -152,13 +143,13 @@ class PhysicsBody(Component):
         if shape in self.shapes:
             self.shapes.remove(shape)
             if self._registered and self._physics_service is not None:
-                self._physics_service._sync_body_shapes(self)
+                self._physics_service.sync_body_shapes(self)
 
     def clear_shapes(self) -> None:
         """Remove all shapes."""
         self.shapes.clear()
         if self._registered and self._physics_service is not None:
-            self._physics_service._sync_body_shapes(self)
+            self._physics_service.sync_body_shapes(self)
 
     # ------------------------------------------------------------------
     # Force & Impulse API
@@ -236,10 +227,6 @@ class PhysicsBody(Component):
         if self._pm_body is not None and not self._pm_body.is_sleeping:
             self._pm_body.sleep()
 
-    # ------------------------------------------------------------------
-    # Lifecycle — auto register/unregister with Physics
-    # ------------------------------------------------------------------
-
     def on_start(self) -> None:
         """Automatically register with Physics when the owning node starts updating."""
         if self.unit is None:
@@ -250,15 +237,9 @@ class PhysicsBody(Component):
             self.transform.recalc_world(parent_world)
             self.transform.reset_interpolation()
 
-        svc = self.unit.one_or_none("@Physics", scope="global")
-        if svc is None:
-            svc = self.unit.one_or_none("Physics", scope="global")
-        if svc is not None:
-            from .service import Physics
-
-            if isinstance(svc, Physics):
-                self._physics_service = svc
-                svc.register_body(self)
+        svc = cast("IPhysics", self.unit.one("@Physics", scope="global"))
+        self._physics_service = svc
+        svc.register_body(self)
 
     def on_destroy(self) -> None:
         """Clean up pymunk references when the component is destroyed."""

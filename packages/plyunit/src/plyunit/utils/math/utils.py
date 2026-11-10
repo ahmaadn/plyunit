@@ -1,5 +1,7 @@
 """Misc math utilities."""
 
+import math
+
 
 def lerp_vector2(
     a: tuple[float, float],
@@ -50,3 +52,8 @@ def clamp(value: float, min_value: float, max_value: float) -> float:
         float: The clamped value.
     """
     return max(min_value, min(max_value, value))
+
+
+def snap(value: float) -> int:
+    """Bulatkan ke piksel terdekat. Satu aturan untuk kamera DAN gambar agar tidak jitter."""
+    return math.floor(value + 0.5)

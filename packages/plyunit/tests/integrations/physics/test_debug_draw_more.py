@@ -1,15 +1,36 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
 
+import plyunit as pu
+from plyunit.backends.physics.pymunk.debug_draw import PhysicsDebugDraw
+
+
+class FakeRenderer:
+    def __init__(self):
+        self.primitives = []
+        self.passes = []
+
+    def create_pass(self, name, **kwargs):
+        self.passes.append((name, kwargs))
+
+    def render_custom(self, *, draw_func, **state):
+        draw_func(self)
+
+    def draw_circle(self, **kwargs):
+        self.primitives.append(("circle", kwargs))
+
+    def draw_rectangle(self, **kwargs):
+        self.primitives.append(("rect", kwargs))
+
+    def draw_line(self, **kwargs):
+        self.primitives.append(("line", kwargs))
+
 
 def test_debug_draw_visibility_and_camera():
-    pytest.importorskip("pymunk")
-    import plyunit as pu
-    from plyunit.backends.physics.pymunk.debug_draw import PhysicsDebugDraw
-
     svc = pu.Physics(gravity=(0.0, 0.0), enable_spatial_hash=False)
     svc.add_static(
         pu.StaticBody(
@@ -22,7 +43,10 @@ def test_debug_draw_visibility_and_camera():
             ],
         )
     )
-    h = svc.create_body(
+    svc.add_static(
+        pu.StaticBody(position=(1000, 1000), shapes=[pu.CircleShape(radius=7)])
+    )
+    handle = svc.create_body(
         position=(0, 0),
         shapes=[pu.BoxShape(width=10, height=10)],
         filter=pu.CollisionFilter.dynamic_actor(),
@@ -33,83 +57,59 @@ def test_debug_draw_visibility_and_camera():
         get_view_rect=lambda: (-100, -100, 100, 100),
         viewport=(0, 0, 200, 200),
     )
+    registry = pu.UnitRegistry()
+    registry.register(svc)
 
-    class Unit:
-        def one_or_none(self, ref, scope="mixed"):
-            if "Physics" in str(ref):
-                return svc
-            if "Camera" in str(ref):
-                return camera
-            if "App" in str(ref):
-                return SimpleNamespace(camera=camera)
-            return None
-
-        time = None
-
-    class FakeRenderer:
+    class CameraApp(pu.Unit):
         def __init__(self):
-            self.primitives = []
-            self.passes = []
+            super().__init__(name="App", is_unique=True, register=False)
+            self.camera = camera
 
-        def create_pass(self, name, **kw):
-            self.passes.append((name, kw))
-
-        def render_custom(self, *, draw_func, **state):
-            draw_func(self)
-
-        def draw_circle(self, **kw):
-            self.primitives.append(("c", kw))
-
-        def draw_rectangle(self, **kw):
-            self.primitives.append(("r", kw))
-
-        def draw_line(self, **kw):
-            self.primitives.append(("l", kw))
-
-    dbg = PhysicsDebugDraw(
-        draw_bodies=True,
-        draw_statics=True,
-        draw_areas=True,
-        draw_contacts=True,
-        draw_aabb=True,
+    app = CameraApp()
+    registry.register(app)
+    node = pu.NodeUnit(name="debug-node")
+    node.global_units = registry
+    dbg = node.add_component(
+        PhysicsDebugDraw(
+            draw_bodies=True,
+            draw_statics=True,
+            draw_areas=True,
+            draw_contacts=True,
+            draw_aabb=True,
+        )
     )
-    # pyrefly: ignore [bad-assignment]
-    dbg.unit = Unit()
-    r = FakeRenderer()
-    # pyrefly: ignore [bad-argument-type]
-    dbg.render_submit(r, object())
-    assert r.primitives or r.passes
+    dbg.on_start()
+    renderer = FakeRenderer()
+    dbg.render_submit(cast(pu.Renderer, renderer), pu.RenderContext())
 
-    # visibility helper
+    assert renderer.passes[0][1]["camera"] is camera
+    assert renderer.passes[0][1]["viewport_scissor"] == (0, 0, 200, 200)
+    assert any(kind == "circle" for kind, _ in renderer.primitives)
+    assert any(kind == "rect" for kind, _ in renderer.primitives)
+    assert not any(
+        kind == "circle" and payload["radius"] == 7
+        for kind, payload in renderer.primitives
+    )
     assert PhysicsDebugDraw._is_visible([], None) is True
     assert PhysicsDebugDraw._is_visible([], (-1, -1, 1, 1)) is False
-    shape = SimpleNamespace(
-        bb=SimpleNamespace(left=-10, right=10, top=-10, bottom=10)
-    )
-    assert PhysicsDebugDraw._is_visible([shape], (-5, -5, 5, 5)) is True
+    assert PhysicsDebugDraw._is_visible([pu.AABB(-10, -10, 10, 10)], (-5, -5, 5, 5))
+    assert not PhysicsDebugDraw._is_visible([pu.AABB(10, 10, 20, 20)], (-5, -5, 5, 5))
 
-    svc.destroy_body(h)
+    node.destroy_component(dbg)
+    svc.destroy_body(handle)
+    svc.clear_statics()
 
 
-def test_debug_draw_without_service():
-    pytest.importorskip("pymunk")
-    from plyunit.backends.physics.pymunk.debug_draw import PhysicsDebugDraw
+def test_debug_draw_start_requires_global_service():
+    node = pu.NodeUnit(name="debug-node")
+    node.global_units = pu.UnitRegistry()
+    dbg = node.add_component(PhysicsDebugDraw())
 
-    class Unit:
-        def one_or_none(self, *a, **k):
-            return None
+    with pytest.raises(pu.NoResultFound, match="@Physics"):
+        dbg.on_start()
 
-        time = None
-
-    class FakeRenderer:
-        def create_pass(self, *a, **k):
-            pass
-
-        def render_custom(self, **kwargs):
-            pytest.fail("No drawing should be queued without a physics service")
-
-    dbg = PhysicsDebugDraw()
-    # pyrefly: ignore [bad-assignment]
-    dbg.unit = Unit()
-    # pyrefly: ignore [bad-argument-type]
-    dbg.render_submit(FakeRenderer(), object())
+    renderer = FakeRenderer()
+    dbg.render_submit(cast(pu.Renderer, renderer), pu.RenderContext())
+    assert renderer.passes == []
+    assert renderer.primitives == []
+    node.destroy_component(dbg)

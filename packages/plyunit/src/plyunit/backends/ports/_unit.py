@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from plyunit.core.components.component import Component
     from plyunit.core.components.transform import TransformState
     from plyunit.core.types import RectType
-    from plyunit.core.units.unit import QueryScope, UnitKind
+    from plyunit.core.units.unit import QueryScope, Unit, UnitKind
     from plyunit.core.units.unit_registry import UnitRegistry
     from plyunit.rendering.enum import BlendMode
     from plyunit.rendering.render_context import RenderContext
@@ -112,11 +112,11 @@ class IUnit(Protocol):
         ...
 
     @overload
-    def group[T: IUnit](
+    def group[T: Unit](
         self, unit_ref: type[T], *, scope: QueryScope = "mixed"
     ) -> list[T]: ...
     @overload
-    def group(self, unit_ref: str, *, scope: QueryScope = "mixed") -> list[IUnit]: ...
+    def group(self, unit_ref: str, *, scope: QueryScope = "mixed") -> list[Unit]: ...
     def group(self, unit_ref: Any, *, scope: QueryScope = "mixed") -> Any:
         """Query all units matching a class or name reference.
 
@@ -125,17 +125,15 @@ class IUnit(Protocol):
         """
         ...
 
-    def find_by_name(self, name: str, *, scope: QueryScope = "mixed") -> list[IUnit]:
+    def find_by_name(self, name: str, *, scope: QueryScope = "mixed") -> list[Unit]:
         """Find units by name with scope resolution."""
         ...
 
-    def find_by_tag(self, tag: str, *, scope: QueryScope = "mixed") -> list[IUnit]:
+    def find_by_tag(self, tag: str, *, scope: QueryScope = "mixed") -> list[Unit]:
         """Find units by tag with scope resolution."""
         ...
 
-    def find_unique_name(
-        self, name: str, *, scope: QueryScope = "mixed"
-    ) -> list[IUnit]:
+    def find_unique_name(self, name: str, *, scope: QueryScope = "mixed") -> list[Unit]:
         """Find units registered under a unique name."""
         ...
 

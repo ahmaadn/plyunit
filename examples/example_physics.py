@@ -346,11 +346,8 @@ class PhysicsScene(pu.SceneUnit):
         self._debug_draw: pu.PhysicsDebugDraw | None = None
         self._debug_node: pu.NodeUnit | None = None
         self._spawn_counter = 0
-        self._gravity_on = True
 
     def on_load(self) -> None:
-        self._gravity_on = True
-
         # Floor — static body via QuadTree
         floor = pu.StaticBody(
             position=(400, 560),
@@ -496,11 +493,10 @@ class PhysicsScene(pu.SceneUnit):
 
         # Toggle gravity
         if kb.is_pressed("toggle_gravity") and self._physics:
-            if self._gravity_on:
-                self._physics.set_gravity(0, 0)
-            else:
+            if self._physics.gravity == (0, 0):
                 self._physics.set_gravity(0, 900)
-            self._gravity_on = not self._gravity_on
+            else:
+                self._physics.set_gravity(0, 0)
 
         # Toggle debug draw
         if kb.is_pressed("toggle_debug"):  # noqa: SIM102

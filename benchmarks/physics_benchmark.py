@@ -129,30 +129,29 @@ class BenchmarkBodyRenderer(pu.Component):
                 layer=Layer.ENTITIES,
             )
         elif self.record.shape == "circle":
+            radius, color = self.record.radius, self.record.color
             renderer.render_custom(
                 z=0,
                 layer=Layer.ENTITIES,
-                draw_func=lambda canvas, radius=self.record.radius, color=self.record.color: (
-                    canvas.draw_circle(
-                        center=(x, y),
-                        radius=radius,
-                        color=color,
-                    )
+                draw_func=lambda canvas, radius=radius, color=color: canvas.draw_circle(
+                    center=(x, y),
+                    radius=radius,
+                    color=color,
                 ),
             )
         else:
-            renderer.render_custom(
-                z=0,
-                layer=Layer.ENTITIES,
-                draw_func=lambda canvas, rect=(x, y, self.record.width, self.record.height), origin=(self.record.width * 0.5, self.record.height * 0.5), rotation=world.rotation, color=self.record.color: (
-                    canvas.draw_rectangle(
-                        rect=rect,
-                        origin=origin,
-                        rotation=rotation,
-                        color=color,
-                    )
-                ),
-            )
+            rect = (x, y, self.record.width, self.record.height)
+            origin = (self.record.width * 0.5, self.record.height * 0.5)
+            rotation, color = world.rotation, self.record.color
+
+            def draw_box(
+                canvas, rect=rect, origin=origin, rotation=rotation, color=color
+            ):
+                canvas.draw_rectangle(
+                    rect=rect, origin=origin, rotation=rotation, color=color
+                )
+
+            renderer.render_custom(z=0, layer=Layer.ENTITIES, draw_func=draw_box)
 
 
 @dataclass(slots=True)
@@ -395,11 +394,11 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
         if elapsed >= self.config.warmup_seconds:
             profile = self._physics.last_step_profile
             step_ms = (
-                profile.pre_sync_ms + profile.pymunk_step_ms + profile.post_sync_ms
+                profile.pre_sync_ms + profile.backend_step_ms + profile.post_sync_ms
             )
             self._physics_step_samples_ms.append(step_ms)
             self._pre_sync_samples_ms.append(profile.pre_sync_ms)
-            self._pymunk_step_samples_ms.append(profile.pymunk_step_ms)
+            self._pymunk_step_samples_ms.append(profile.backend_step_ms)
             self._post_sync_samples_ms.append(profile.post_sync_ms)
             self._collision_dispatch_samples_ms.append(profile.collision_dispatch_ms)
             self._sleeping_body_samples.append(float(profile.sleeping_body_count))
@@ -729,7 +728,9 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
         sprite_mode = self.config.render_mode == "sprite"
         if self._static_rects:
             if sprite_mode:
-                for rect, color in zip(self._static_rects, self._static_colors):
+                for rect, color in zip(
+                    self._static_rects, self._static_colors, strict=True
+                ):
                     renderer.render_sprite(
                         texture=self._shape_textures["box"],
                         dest=rect,
@@ -738,10 +739,11 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
                         layer=Layer.WORLD,
                     )
             else:
+                rects, colors = tuple(self._static_rects), tuple(self._static_colors)
                 renderer.render_custom(
                     z=-10,
                     layer=Layer.WORLD,
-                    draw_func=lambda canvas, rects=tuple(self._static_rects), colors=tuple(self._static_colors): (
+                    draw_func=lambda canvas, rects=rects, colors=colors: (
                         canvas.draw_rectangle_batch(
                             rects=rects,
                             colors=colors,
@@ -792,18 +794,18 @@ class PhysicsBenchmarkScene(pu.SceneUnit):
                 ))
                 rect_cols.append(record.color)
             else:
-                renderer.render_custom(
-                    z=0,
-                    layer=Layer.ENTITIES,
-                    draw_func=lambda canvas, rect=(x, y, record.width, record.height), origin=(record.width * 0.5, record.height * 0.5), rotation=rotation, color=record.color: (
-                        canvas.draw_rectangle(
-                            rect=rect,
-                            origin=origin,
-                            rotation=rotation,
-                            color=color,
-                        )
-                    ),
-                )
+                rect = (x, y, record.width, record.height)
+                origin = (record.width * 0.5, record.height * 0.5)
+                color = record.color
+
+                def draw_box(
+                    canvas, rect=rect, origin=origin, rotation=rotation, color=color
+                ):
+                    canvas.draw_rectangle(
+                        rect=rect, origin=origin, rotation=rotation, color=color
+                    )
+
+                renderer.render_custom(z=0, layer=Layer.ENTITIES, draw_func=draw_box)
 
         if circles_pos:
             renderer.render_custom(

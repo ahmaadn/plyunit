@@ -7,7 +7,7 @@ def test_physics_many_operations():
     pytest.importorskip("pymunk")
     import plyunit as pu
     from plyunit.backends.physics.pymunk.physics_area import PhysicsArea
-    from plyunit.core.components.physics import BodyType
+    from plyunit.services.physics._types import BodyType
 
     svc = pu.Physics(
         gravity=(0.0, 200.0),
@@ -19,14 +19,12 @@ def test_physics_many_operations():
     svc.profile_enabled = True
 
     statics = []
-    for i, shape in enumerate(
-        [
-            pu.BoxShape(width=20, height=10, offset=(0, 0)),
-            pu.CircleShape(radius=8, offset=(1, 1)),
-            pu.SegmentShape(a=(-20, 0), b=(20, 0), radius=1),
-            pu.PolygonShape(vertices=[(-5, -5), (5, -5), (0, 5)]),
-        ]
-    ):
+    for i, shape in enumerate([
+        pu.BoxShape(width=20, height=10, offset=(0, 0)),
+        pu.CircleShape(radius=8, offset=(1, 1)),
+        pu.SegmentShape(a=(-20, 0), b=(20, 0), radius=1),
+        pu.PolygonShape(vertices=[(-5, -5), (5, -5), (0, 5)]),
+    ]):
         s = pu.StaticBody(position=(i * 40.0, 100.0), shapes=[shape])
         svc.add_static(s)
         statics.append(s)
@@ -85,32 +83,21 @@ def test_physics_many_operations():
         n.transform.recalc_world(None)
         svc.step(1 / 60)
 
-    assert svc.last_step_profile is not None
+    assert svc.last_step_profile.shape_count == 15
+    assert svc.body_count == 6
+    assert svc.area_count == 1
+    assert svc.static_count == 4
 
-    for h in handles:
-        svc.destroy_body(h)
+    svc.destroy_body_batch(handles)
     for n, body in nodes:
-        try:
-            n.destroy_component(body)
-        except Exception:
-            try:
-                body.on_destroy()
-            except Exception:
-                pass
-    # avoid buggy unregister path if present — destroy node instead
-    try:
-        an.destroy()
-    except Exception:
-        try:
-            area.on_destroy()
-        except Exception:
-            pass
+        n.destroy_component(body)
+        assert body._registered is False
+    an.destroy()
+    assert area._registered is False
     for s in statics:
-        try:
-            svc.remove_static(s.id)
-        except Exception:
-            pass
-    try:
-        svc.clear_statics()
-    except Exception:
-        pass
+        svc.remove_static(s.id)
+    svc.clear_statics()
+    assert svc.body_count == svc.area_count == svc.static_count == 0
+    assert list(svc.iter_body_states()) == []
+    assert list(svc.iter_area_states()) == []
+    assert len(svc._space.bodies) == len(svc._space.shapes) == 0

@@ -15,11 +15,14 @@ from .handler import (
 )
 from .imgui import DrawCallback, ImGuiPort
 from .input import IGamepad, IInput, IMouse, ITouch
+from .physics import AreaStateView, BodyStateView, IPhysics
 from .renderer import ICanvas2D, IRenderPass, IUnifiedBufferBatch, IWindow
 from .shaders import IShaders
 from .text import IText, ITextRenderer, ShapedText, TemplateText
 
 __all__ = (
+    "AreaStateView",
+    "BodyStateView",
     "DrawCallback",
     "FontHandle",
     "IAssets",
@@ -30,6 +33,7 @@ __all__ = (
     "IImageProcessor",
     "IInput",
     "IMouse",
+    "IPhysics",
     "IRenderPass",
     "IShaders",
     "IText",

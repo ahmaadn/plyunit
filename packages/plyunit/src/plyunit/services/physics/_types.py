@@ -1,15 +1,41 @@
 """Base types and shape definitions for the plyunit physics engine.
 
-Contains AABB, BodyType, CollisionFilter, CollisionInfo, and the physics
-collision shapes. This module is pure (does not depend on pymunk) so it can
-be used by core/engine modules without violating purity.
+Contains AABB, BodyType, CollisionFilter, CollisionInfo, the physics
+collision shapes, and the backend-agnostic service data types (StaticBody,
+PhysicsStepProfile, PhysicsBodyCreateInfo). This module is pure (does not
+depend on any physics backend) so it can be used by core/engine modules
+without violating purity.
 """
 
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, NewType
+
+_static_id_counter = itertools.count(1)
+
+__all__ = (
+    "AABB",
+    "DYNAMIC_ACTOR",
+    "DYNAMIC_SENSOR_TARGET",
+    "PROJECTILE",
+    "SENSOR",
+    "WORLD_STATIC",
+    "BodyType",
+    "BoxShape",
+    "CircleShape",
+    "CollisionFilter",
+    "CollisionInfo",
+    "PhysicsBodyCreateInfo",
+    "PhysicsHandle",
+    "PhysicsShape",
+    "PhysicsStepProfile",
+    "PolygonShape",
+    "SegmentShape",
+    "StaticBody",
+)
 
 
 class BodyType(Enum):
@@ -372,3 +398,77 @@ class PolygonShape(PhysicsShape):
     """
 
     vertices: list[tuple[float, float]] = field(default_factory=list)
+
+
+@dataclass
+class StaticBody:
+    """Static body representation (tile, wall, tree) — NOT a NodeUnit.
+
+    Pure data: native backend objects are tracked by the backend itself
+    (keyed by ``id``), never stored on this class.
+
+    Usage example::
+
+        static = StaticBody(
+            position=(100, 200),
+            shapes=[BoxShape(width=32, height=32)],
+        )
+        physics.add_static(static)
+
+    Attributes:
+        position: World position (x, y).
+        shapes: The list of collision shapes that make up this body.
+        filter: The default collision filter for all shapes.
+        user_data: Custom data that can be attached by the user.
+        id: Unique auto-generated ID.
+    """
+
+    position: tuple[float, float] = (0.0, 0.0)
+    shapes: list[PhysicsShape] = field(default_factory=list)
+    filter: CollisionFilter = field(default_factory=CollisionFilter)
+    user_data: Any = None
+    id: int = field(default_factory=lambda: next(_static_id_counter))
+
+
+@dataclass(slots=True)
+class PhysicsStepProfile:
+    """Profiling statistics for a single physics ``step``."""
+
+    pre_sync_ms: float = 0.0
+    backend_step_ms: float = 0.0
+    post_sync_ms: float = 0.0
+    collision_dispatch_ms: float = 0.0
+    active_body_count: int = 0
+    sleeping_body_count: int = 0
+    shape_count: int = 0
+    arbiter_count: int = 0
+
+    def as_dict(self) -> dict[str, float]:
+        """Convert the profile to a dict (for logging or telemetry)."""
+        return {
+            "pre_sync_ms": self.pre_sync_ms,
+            "backend_step_ms": self.backend_step_ms,
+            "post_sync_ms": self.post_sync_ms,
+            "collision_dispatch_ms": self.collision_dispatch_ms,
+            "active_body_count": float(self.active_body_count),
+            "sleeping_body_count": float(self.sleeping_body_count),
+            "shape_count": float(self.shape_count),
+            "arbiter_count": float(self.arbiter_count),
+        }
+
+
+@dataclass(slots=True)
+class PhysicsBodyCreateInfo:
+    """Constructor parameters for batch body creation."""
+
+    position: tuple[float, float] = (0.0, 0.0)
+    rotation: float = 0.0
+    body_type: BodyType = BodyType.DYNAMIC
+    shapes: list[PhysicsShape] = field(default_factory=list)
+    mass: float = 1.0
+    filter: CollisionFilter | None = None
+    fixed_rotation: bool = False
+    gravity_scale: float = 1.0
+    linear_damping: float = 0.0
+    angular_damping: float = 0.0
+    user_data: Any = None

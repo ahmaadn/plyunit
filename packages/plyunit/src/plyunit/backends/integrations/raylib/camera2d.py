@@ -365,6 +365,7 @@ class Camera2D(ServiceUnit, ICamera2D):
             self._camera.target.y = self.pos[1]
             self._camera.rotation = self.rotation
             self._is_snap_next_frame = False
+
             return
 
         tx, ty = self.target

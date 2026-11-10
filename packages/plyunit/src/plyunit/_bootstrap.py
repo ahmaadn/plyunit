@@ -47,19 +47,17 @@ def _load_backend_bindings():
 
 def _physics[T: App](app: T, cfg: PhysicsConfig) -> Physics:
     """Build and inject the configured physics adapter."""
-    from plyunit.backends.physics import Physics, PhysicsBackend
+    from plyunit.backends.physics import Physics
 
     return Physics(
-        PhysicsBackend(
-            gravity=cfg.gravity,
-            spatial_hash_dim=cfg.spatial_hash_dim,
-            spatial_hash_count=cfg.spatial_hash_count,
-            sleep_time_threshold=cfg.sleep_time_threshold,
-            idle_speed_threshold=cfg.idle_speed_threshold,
-            iterations=cfg.iterations,
-            damping=cfg.damping,
-            enable_spatial_hash=cfg.enable_spatial_hash,
-        ),
+        gravity=cfg.gravity,
+        spatial_hash_dim=cfg.spatial_hash_dim,
+        spatial_hash_count=cfg.spatial_hash_count,
+        sleep_time_threshold=cfg.sleep_time_threshold,
+        idle_speed_threshold=cfg.idle_speed_threshold,
+        iterations=cfg.iterations,
+        damping=cfg.damping,
+        enable_spatial_hash=cfg.enable_spatial_hash,
         world_bounds=cfg.world_bounds,
     )
 

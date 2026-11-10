@@ -13,14 +13,12 @@ def test_physics_service_static_and_query():
         shapes=[pu.BoxShape(width=40, height=20)],
     )
     svc.add_static(s)
-    svc.add_static_batch(
-        [
-            pu.StaticBody(
-                position=(200.0, 200.0),
-                shapes=[pu.CircleShape(radius=10.0)],
-            )
-        ]
-    )
+    svc.add_static_batch([
+        pu.StaticBody(
+            position=(200.0, 200.0),
+            shapes=[pu.CircleShape(radius=10.0)],
+        )
+    ])
     h = svc.create_body(
         position=(0.0, 0.0),
         shapes=[pu.CircleShape(radius=5.0)],
@@ -67,5 +65,8 @@ def test_physics_area_register_via_service():
     area = node.add_component(PhysicsArea(name="z"))
     area.add_shape(pu.BoxShape(width=20, height=20))
     area.on_start()
-    assert area._physics_service is not None or area._registered
+    assert area._physics_service is svc
+    assert area._registered is True
+    assert svc.area_count == 1
     area.on_destroy()
+    assert svc.area_count == 0
