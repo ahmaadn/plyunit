@@ -1,10 +1,4 @@
-"""Main plyunit renderer module managing the pass-based render pipeline.
-
-Sprites: ``submit_*`` → FrameBuffer SoA → sort/runs → ``ubr_submit_frame``.
-Non-sprites (primitives/text/custom) go through the ``RenderItem`` queue.
-The tilemap, particle, debug, and UI sub-facades delegate to the same
-submit calls.
-"""
+"""Main plyunit renderer module managing the pass-based render pipeline."""
 
 from __future__ import annotations
 
@@ -21,7 +15,6 @@ from plyunit.core.units.service_unit import ServiceUnit
 from plyunit.rendering.draw_primitive import draw_primitive
 from plyunit.utils.math import aabb_intersection
 
-from .draw_scope import DrawScope
 from .enum import BlendMode, Layer, PrimitiveKind, RenderKind
 from .frame_buffer import (
     FrameBuffer,
@@ -149,7 +142,6 @@ class Renderer(ServiceUnit):
         self._next_submit_index = 0
         self._is_rendering = False
         # pyrefly: ignore [bad-argument-type]
-        self.draw = DrawScope(self)
         self.profile_enabled = False
         self.frame_profile: dict[str, float] = {}
         self.last_frame_profile: dict[str, float] = {}

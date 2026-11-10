@@ -12,6 +12,18 @@ import numpy as np
 
 from plyunit._constants import MAX_SPRITES
 
+__all__ = (
+    "FrameBuffer",
+    "build_depth_runs",
+    "build_runs",
+    "is_depth_sorted_layer",
+    "pass_name_hash",
+    "resolve_uv",
+    "runs_from_ordered",
+    "set_depth_sort_layers",
+)
+
+
 _DEPTH_SORT_LAYERS: frozenset[int] = frozenset()
 
 
@@ -452,16 +464,3 @@ class FrameBuffer:
             if offset < n_total and self.remaining() == 0:
                 self._ensure_space(1)
         return written
-
-
-__all__ = [
-    "MAX_SPRITES",
-    "FrameBuffer",
-    "build_depth_runs",
-    "build_runs",
-    "is_depth_sorted_layer",
-    "pass_name_hash",
-    "resolve_uv",
-    "runs_from_ordered",
-    "set_depth_sort_layers",
-]
