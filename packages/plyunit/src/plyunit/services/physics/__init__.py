@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from plyunit._lazy import create_lazy_loader
+
 from ._types import (
     AABB,
     DYNAMIC_ACTOR,
@@ -55,12 +57,14 @@ __all__ = (
 )
 
 
-def __getattr__(name: str):
-    if name not in {"Physics", "PhysicsArea", "PhysicsBody", "PhysicsDebugDraw"}:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-    from plyunit.backends import physics
-
-    value = getattr(physics, name)
-    globals()[name] = value
-    return value
+__getattr__, __dir__ = create_lazy_loader(
+    package_name=__name__,
+    lazy_modules={
+        "Physics": "plyunit.backends.physics",
+        "PhysicsArea": "plyunit.backends.physics",
+        "PhysicsBody": "plyunit.backends.physics",
+        "PhysicsDebugDraw": "plyunit.backends.physics",
+    },
+    global_dict=globals(),
+    all_exports=__all__,
+)

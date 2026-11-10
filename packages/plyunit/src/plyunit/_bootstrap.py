@@ -13,7 +13,6 @@ if TYPE_CHECKING:
     from plyunit.backends.physics import Physics
     from plyunit.backends.ports.assets import IAssets
     from plyunit.backends.ports.audio import IAudio
-    from plyunit.backends.ports.camera2d import ICamera2D
     from plyunit.core.app import App, AppConfig, PhysicsConfig
     from plyunit.core.schema_config import AudioConfig, ImGuiConfig
     from plyunit.services.animations import Animations
@@ -94,7 +93,6 @@ def init[T: App](
     asset: Service[T, IAssets] | DEFAULT | None = DEFAULT,
     animations: Service[T, Animations] | DEFAULT | None = DEFAULT,
     scene_manager: Service[T, SceneManager] | DEFAULT | None = DEFAULT,
-    camera: Service[T, ICamera2D] | DEFAULT | None = DEFAULT,
 ) -> T:
     """Wire an application to the selected backend and initialize its window.
 
@@ -141,14 +139,6 @@ def init[T: App](
     animation_path = cfg.animation_path or cfg.assets_path
     app.animations = _service(
         app, animations, lambda: Animations(asset_base_path=animation_path)
-    )
-    app.camera = _service(
-        app,
-        camera,
-        lambda: bindings["Camera2D"](
-            size=(cfg.window_width, cfg.window_height),
-            position=(cfg.window_width / 2.0, cfg.window_height / 2.0),
-        ),
     )
     app.init(cfg)
     if cfg.physics.enabled:

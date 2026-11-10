@@ -5,10 +5,10 @@ text, draw immediately, and submit cached glyph quads to the renderer.
 """
 
 import os
+from typing import cast
 
 import plyunit as pu
-from plyunit.backends.ports.renderer import ICanvas2D
-from plyunit.backends.ports.text import IText, ShapedText
+from plyunit import ICanvas2D, IText, ShapedText
 
 
 class TextShowcase(pu.NodeUnit):
@@ -16,7 +16,7 @@ class TextShowcase(pu.NodeUnit):
         super().__init__(name="TextShowcase")
 
     def on_ready(self):
-        self.text: IText = self.one("@Text")
+        self.text = cast(IText, self.one("@Text"))
 
         # Resolve font paths relative to this example, not the working directory.
         font_dir = os.path.join(os.path.dirname(__file__), "assets", "IBM_Plex_Mono")

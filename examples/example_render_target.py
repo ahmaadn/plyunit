@@ -9,7 +9,6 @@ import math
 import pyray as pr
 
 import plyunit as pu
-from plyunit.backends.ports.camera2d import ICamera2D
 from plyunit.backends.ports.handler import RenderTextureHandle
 from plyunit.backends.ports.renderer import ICanvas2D
 
@@ -273,9 +272,7 @@ class RenderTargetApp(pu.App):
         self.input.map("move_right", pr.KeyboardKey.KEY_D)
 
         # Follow the player with a short smoothing interval.
-        self.camera: ICamera2D = pu.Camera2D(
-            size=(640, 500), position=(400, 300), slowness=0.1
-        )
+        self.camera = pu.Camera2D(size=(640, 500), position=(400, 300), slowness=0.1)
         self.camera.setup(640, 500)
         self.camera.teleport((400, 300))
         self.scene_manager.push(MainScene())

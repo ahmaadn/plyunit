@@ -1,16 +1,18 @@
 from typing import TYPE_CHECKING
 
+from plyunit._lazy import create_lazy_loader
+
 if TYPE_CHECKING:
     from plyunit.backends.imgui import ImGui
 
 __all__ = ("ImGui",)
 
 
-def __getattr__(name: str):
-    if name != "ImGui":
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-    from plyunit.backends.imgui import ImGui
-
-    globals()[name] = ImGui
-    return ImGui
+__getattr__, __dir__ = create_lazy_loader(
+    package_name=__name__,
+    lazy_modules={
+        "ImGui": "plyunit.backends.imgui",
+    },
+    global_dict=globals(),
+    all_exports=__all__,
+)

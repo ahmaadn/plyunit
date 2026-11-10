@@ -14,7 +14,6 @@ import math
 import pyray as pr
 
 import plyunit as pu
-from plyunit.backends.ports.camera2d import ICamera2D
 from plyunit.backends.ports.renderer import ICanvas2D
 
 
@@ -196,11 +195,7 @@ class ScissorCameraApp(pu.App):
         self.input.map("reset", pr.KeyboardKey.KEY_R)
 
         # Free-look: snap, no dead zone / slowness lag.
-        self.camera: ICamera2D = pu.Camera2D(
-            size=(640, 500),
-            position=(320, 250),
-            slowness=0.0,
-        )
+        self.camera = pu.Camera2D(size=(640, 500), position=(320, 250), slowness=0.0)
         self.camera.setup(640, 500)
         self.camera.teleport((320, 250))
         self._zoom = 1.0

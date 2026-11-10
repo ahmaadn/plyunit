@@ -58,7 +58,6 @@ def test_init_default(bindings, monkeypatch) -> None:
     assert app.animations is animations
     assert app.scene_manager is scene
     bindings["Assets"].assert_called_once_with(asset_base_path=config.assets_path)
-    bindings["Camera2D"].assert_called_once_with(size=(100, 80), position=(50.0, 40.0))
     renderer_factory.assert_called_once_with(
         canvas=app.canvas,
         ubr=bindings["UnifiedBufferBatch"].return_value,
@@ -74,31 +73,14 @@ def test_service_overrides_receive_app_and_none_disables(bindings, monkeypatch) 
     custom_assets = object()
     factory = Mock(return_value=custom_assets)
     app = ConfigOnlyApp()
-    bootstrap.init(app, asset=factory, animations=None, scene_manager=None, camera=None)
+    bootstrap.init(app, asset=factory, animations=None, scene_manager=None)
     factory.assert_called_once_with(app)
     assert app.assets is custom_assets
     assert app.animations is None
     assert app.scene_manager is None
-    assert app.camera is None
     bindings["Assets"].assert_not_called()
-    bindings["Camera2D"].assert_not_called()
 
 
-def test_camera_override_keeps_factory_configuration(bindings, monkeypatch) -> None:
-    monkeypatch.setattr(
-        "plyunit.rendering.renderer.Renderer", lambda **kwargs: object()
-    )
-    camera = SimpleNamespace(position=(-120.0, 75.0), zoom=2.0)
-    factory = Mock(return_value=camera)
-    app = ConfigOnlyApp()
-
-    bootstrap.init(app, camera=factory)
-
-    factory.assert_called_once_with(app)
-    assert app.camera is camera
-    assert camera.position == (-120.0, 75.0)
-    assert camera.zoom == 2.0
-    bindings["Camera2D"].assert_not_called()
 
 
 def test_bootstrap_optional_services_use_selected_adapters(bindings, monkeypatch):
@@ -173,18 +155,6 @@ def test_optional_gpu_services_attach_after_window_and_batch_init(
         asset=None,
         scene_manager=None,
         animations=None,
-        camera=None,
     )
     assert events == ["window", "batch", "imgui"]
     app.shutdown()
-
-
-def test_default_resolution_and_factory_are_distinct() -> None:
-    app = ConfigOnlyApp()
-    default = Mock(return_value="default")
-    assert bootstrap._service(app, bootstrap.DEFAULT, default) == "default"
-    assert bootstrap._service(app, None, default) is None
-    override = Mock(return_value="custom")
-    assert bootstrap._service(app, override, default) == "custom"
-    override.assert_called_once_with(app)
-    default.assert_called_once()

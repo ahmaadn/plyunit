@@ -1,10 +1,45 @@
+import json
 import logging
 from pathlib import Path
 
 import plyunit as pu
-from examples.test_assets.load_assets import load_tiles
 
 logger = logging.Logger(__name__)
+
+
+def load_tiles(assets: pu.Assets) -> None:
+    """Register the tile texture and regions that fit its actual image bounds.
+
+    Args:
+        assets: Configured service whose base contains the ``tile`` directory.
+    """
+    config_path = assets.asset_base_path / "tile" / "tiles.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    assets.load_asset("tile/tileset.png", asset_id="showcase_tiles")
+    root = assets.get_asset("showcase_tiles")
+
+    regions = {}
+    for name, rect in config["regions"].items():
+        x, y, width, height = rect
+        if (
+            x < 0
+            or y < 0
+            or width <= 0
+            or height <= 0
+            or x + width > root.width
+            or y + height > root.height
+        ):
+            logger.warning("Skipping tile region outside the source image: %s", name)
+            continue
+        regions[name] = tuple(float(value) for value in rect)
+    assets.load_from_dict({
+        "id": "showcase_tiles",
+        "type": "spritesheet",
+        "image_path": "tile/tileset.png",
+        "texture": config.get("texture", {}),
+        "regions": regions,
+        "config_path": config_path,
+    })
 
 
 class PlayerNode(pu.NodeUnit):
@@ -62,23 +97,15 @@ class TestAssetsApp(pu.App):
 
         self.setup_logging("DEBUG", "./logs/test_assets.log")
 
-        script_dir = Path(__file__).parent
-        self.one("@Assets").set_assets_path(script_dir / "data")
-        self.one("@Assets").load_asset(
-            "images/test.png",
-            asset_id="test_texture",
-        )
-        self.one("@Assets").load_asset("background/config.json")
         self.one("@Assets").load_folder("player/run")
-
+        self.one("@Assets").load_asset("images/test.png", asset_id="test_texture")
+        self.one("@Assets").load_asset("background/config.json")
         self.one("@Assets").load_asset(
             "images_with_json/config.json", asset_id="test_texture_with_json"
         )
         load_tiles(self.one("@Assets"))
 
-        self.animations.set_base_path(script_dir / "data")
         self.animations.load("player/animations.json")
-
         self.one("@SceneManager").push(TestScreen())
         self.text = pu.Text()
 
@@ -97,11 +124,13 @@ class TestAssetsApp(pu.App):
 
 
 def main():
+    script_dir = Path(__file__).parent
     app = pu.init(
         TestAssetsApp(),
         pu.AppConfig(
             "Test Assets App",
-            assets_path=Path(__file__).resolve().parent / "data",
+            assets_path=script_dir / "data",
+            animation_path=script_dir / "data",
             window_height=720,
             window_width=1280,
             target_fps=60,

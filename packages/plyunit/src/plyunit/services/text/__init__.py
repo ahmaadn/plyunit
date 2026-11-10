@@ -1,5 +1,7 @@
 from typing import TYPE_CHECKING
 
+from plyunit._lazy import create_lazy_loader
+
 from .shape import ShapeCache
 
 if TYPE_CHECKING:
@@ -8,12 +10,12 @@ if TYPE_CHECKING:
 __all__ = ("Font", "ShapeCache", "Text")
 
 
-def __getattr__(name: str):
-    if name not in {"Text", "Font"}:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-    from plyunit.backends import integrations
-
-    value = getattr(integrations, name)
-    globals()[name] = value
-    return value
+__getattr__, __dir__ = create_lazy_loader(
+    package_name=__name__,
+    lazy_modules={
+        "Font": "plyunit.backends.integrations",
+        "Text": "plyunit.backends.integrations",
+    },
+    global_dict=globals(),
+    all_exports=__all__,
+)

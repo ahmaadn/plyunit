@@ -1,17 +1,4 @@
-"""plyunit — lightweight units for a Python-based 2D game engine.
-
-This module is a package-level *facade* that exposes all public names via
-lazy resolution. It uses ``__getattr__`` so that only the sub-packages that
-are actually accessed get imported, reducing startup time and the cost of
-optional dependencies (raylib, pymunk, and imgui are not loaded by a plain
-``import plyunit``).
-
-Usage example:
-    >>> import plyunit
-    >>> plyunit.__version__
-    '0.1.0'
-    >>> from plyunit import Audio  # lazy
-"""
+"""plyunit - a Python-based 2D game engine."""
 
 from __future__ import annotations
 
@@ -21,42 +8,8 @@ from plyunit._version import __version__ as __version__
 
 if TYPE_CHECKING:
     from plyunit._bootstrap import create_app, init
-    from plyunit._enums import (
-        ShaderUniform as ShaderUniform,
-        TextureFilter as TextureFilter,
-        TextureWrap as TextureWrap,
-    )
     from plyunit.backends import ports as ports
-    from plyunit.backends.imgui import ImGui as ImGui
-    from plyunit.backends.integrations import (
-        Assets as Assets,
-        Audio as Audio,
-        Camera2D as Camera2D,
-        Canvas2D as Canvas2D,
-        Gamepad as Gamepad,
-        ImageProcessor as ImageProcessor,
-        Input as Input,
-        Mouse as Mouse,
-        Shaders as Shaders,
-        StreamingTexture as StreamingTexture,
-        Text as Text,
-        Touch as Touch,
-        UnifiedBufferBatch as UnifiedBufferBatch,
-        Window as Window,
-    )
-    from plyunit.backends.ports.audio import IAudio as IAudio
-    from plyunit.backends.ports.handler import (
-        FontHandle as FontHandle,
-        ImageHandle as ImageHandle,
-        RenderTextureHandle as RenderTextureHandle,
-        ShaderHandle as ShaderHandle,
-        StreamingTextureHandle as StreamingTextureHandle,
-        Texture2DHandle as Texture2DHandle,
-    )
-    from plyunit.backends.ports.text import (
-        ShapedText as ShapedText,
-        TemplateText as TemplateText,
-    )
+    from plyunit.backends.integrations import Canvas2D, UnifiedBufferBatch
     from plyunit.core.app import (
         App as App,
         AppConfig as AppConfig,
@@ -72,10 +25,6 @@ if TYPE_CHECKING:
         builtin as builtin,
         components as components,
     )
-    from plyunit.core.components.transform import (
-        Transform2D as Transform2D,
-        TransformState as TransformState,
-    )
     from plyunit.core.logging import configure_logging as configure_logging
     from plyunit.core.units import (
         MultipleResultsFound as MultipleResultsFound,
@@ -84,36 +33,39 @@ if TYPE_CHECKING:
         QueryScope as QueryScope,
         SceneUnit as SceneUnit,
         ServiceUnit as ServiceUnit,
-        TransformStore as TransformStore,
         Unit as Unit,
         UnitRegistry as UnitRegistry,
         units as units,
     )
     from plyunit.events.event_bus import EventBus as EventBus
     from plyunit.events.signal import Signal as Signal, on as on
+    from plyunit.handler import (
+        Font as Font,
+        Image as Image,
+        RenderTexture as RenderTexture,
+        Shader as Shader,
+        StreamingTexture as StreamingTexture,
+        Texture2D as Texture2D,
+    )
     from plyunit.rendering import (
         BlendMode as BlendMode,
-        DrawScope as DrawScope,
         Layer as Layer,
         RenderContext as RenderContext,
         Renderer as Renderer,
         RenderPass as RenderPass,
         RenderState as RenderState,
     )
+    from plyunit.service.audio import Audio, VoiceId
     from plyunit.services.animations import (
         AnimationClip as AnimationClip,
         AnimationFrame as AnimationFrame,
         Animations as Animations,
     )
-    from plyunit.services.audio._types import VoiceId as VoiceId
-    from plyunit.services.audio.spatial import compute_spatial as compute_spatial
+    from plyunit.services.assets import Assets
+    from plyunit.services.camera import Camera2D
+    from plyunit.services.imgui import ImGui
+    from plyunit.services.input import Gamepad, Input, Mouse, Touch
     from plyunit.services.physics import (
-        AABB as AABB,
-        DYNAMIC_ACTOR as DYNAMIC_ACTOR,
-        DYNAMIC_SENSOR_TARGET as DYNAMIC_SENSOR_TARGET,
-        PROJECTILE as PROJECTILE,
-        SENSOR as SENSOR,
-        WORLD_STATIC as WORLD_STATIC,
         BodyType as BodyType,
         BoxShape as BoxShape,
         CircleShape as CircleShape,
@@ -130,7 +82,9 @@ if TYPE_CHECKING:
         StaticBody as StaticBody,
     )
     from plyunit.services.scene_manager import SceneManager as SceneManager
+    from plyunit.services.shaders import Shaders
     from plyunit.services.spatial_index import SpatialIndex as SpatialIndex
+    from plyunit.services.text import Text
     from plyunit.services.timers import (
         CoroutineHandle as CoroutineHandle,
         Timer as Timer,
@@ -138,15 +92,10 @@ if TYPE_CHECKING:
         WaitToken as WaitToken,
     )
     from plyunit.services.tween import Tween as Tween, TweenAnimation as TweenAnimation
+    from plyunit.services.window import Window
     from plyunit.tilemap import (
         AutotileProcessor as AutotileProcessor,
         TileMapNode as TileMapNode,
-    )
-    from plyunit.utils import math as math
-    from plyunit.utils.math.easing import EASINGS as EASINGS, get_easing as get_easing
-    from plyunit.utils.pool import (
-        EntityHandle as EntityHandle,
-        EntityPool as EntityPool,
     )
 
 

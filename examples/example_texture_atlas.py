@@ -69,10 +69,10 @@ class AtlasApp(pu.App):
     FIELD_SIZE = (640, 360)
 
     def on_load(self) -> None:
-        self.camera: pu.Camera2D = pu.Camera2D(
-            self.FIELD_SIZE,
-            (self.FIELD_SIZE[0] / 2.0, self.FIELD_SIZE[1] / 2.0),
+        self.camera = pu.Camera2D(
+            self.FIELD_SIZE, (self.FIELD_SIZE[0] / 2.0, self.FIELD_SIZE[1] / 2.0)
         )
+        self.camera.size = self.FIELD_SIZE
         self.camera.setup(1280, 720)
 
         data_dir = Path(__file__).parent / "test_assets" / "data"

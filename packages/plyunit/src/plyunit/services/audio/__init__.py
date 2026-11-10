@@ -7,20 +7,37 @@ never imports or selects a backend.
 
 from typing import TYPE_CHECKING
 
+from plyunit._lazy import create_lazy_loader
+
 from ._types import SoundBankConfig, SoundBankEntry, VoiceId
 from .spatial import compute_spatial
 
 if TYPE_CHECKING:
-    from plyunit.backends.integrations import Audio as Audio
-
-__all__ = ["Audio", "SoundBankConfig", "SoundBankEntry", "VoiceId", "compute_spatial"]
-
-
-def __getattr__(name: str):
-    if name != "Audio":
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
     from plyunit.backends.integrations import Audio
+    from plyunit.backends.ports.audio import IAudio
 
-    globals()[name] = Audio
-    return Audio
+__all__ = [
+    "Audio",
+    "IAudio",
+    "SoundBankConfig",
+    "SoundBankEntry",
+    "VoiceId",
+    "compute_spatial",
+]
+
+
+_LAZY_MODULES = {
+    "Audio": "plyunit.backends.integrations",
+    "IAudio": "plyunit.backends.ports.audio",
+}
+
+
+__getattr__, __dir__ = create_lazy_loader(
+    package_name=__name__,
+    lazy_modules={
+        "Audio": "plyunit.backends.integrations",
+        "IAudio": "plyunit.backends.ports.audio",
+    },
+    global_dict=globals(),
+    all_exports=__all__,
+)

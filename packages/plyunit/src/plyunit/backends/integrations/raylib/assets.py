@@ -108,11 +108,11 @@ class ImageProcessor(IImageProcessor):
     def blit(self, dst: Image, src: Image, pos: tuple[int, int]) -> None:
         """Blit ``src`` onto ``dst`` at ``pos`` without scaling."""
         source = src.raw_image
-        pr.image_draw(
+        pr.image_draw_image_rec(
             dst.raw_image,
             source,
             pr.Rectangle(0, 0, source.width, source.height),
-            pr.Rectangle(int(pos[0]), int(pos[1]), source.width, source.height),
+            pos,
             pr.WHITE,
         )
 

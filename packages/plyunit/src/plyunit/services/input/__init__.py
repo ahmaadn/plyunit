@@ -6,6 +6,8 @@ these data types never selects or loads a backend.
 
 from typing import TYPE_CHECKING
 
+from plyunit._lazy import create_lazy_loader
+
 from ._types import CursorShape, GamepadAxis, GamepadButton, MouseButton
 from .action_event import AxisBinding, InputEvents, MouseEvents
 
@@ -27,12 +29,14 @@ __all__ = (
 )
 
 
-def __getattr__(name: str):
-    if name not in {"Gamepad", "Input", "Mouse", "Touch"}:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-
-    from plyunit.backends import integrations
-
-    value = getattr(integrations, name)
-    globals()[name] = value
-    return value
+__getattr__, __dir__ = create_lazy_loader(
+    package_name=__name__,
+    lazy_modules={
+        "Gamepad": "plyunit.backends.integrations",
+        "Input": "plyunit.backends.integrations",
+        "Mouse": "plyunit.backends.integrations",
+        "Touch": "plyunit.backends.integrations",
+    },
+    global_dict=globals(),
+    all_exports=__all__,
+)
